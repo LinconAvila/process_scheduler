@@ -1,8 +1,8 @@
 #include <iostream>
-#include <vector>
+#include <fstream>
+#include <sstream>
 #include <string>
-#include <time.h>
-
+#include <vector>
 
 
 class ScheduledProcess {
@@ -55,13 +55,14 @@ class PriorityScheduler {
         }
         q.insert(it, p);
     }
-    void addProcess(int pid, int creation_time, int burst_time, int weigths) {              // Método para adicionar um processo à fila de pendentes
-        if (creation_time < 0 || burst_time < 0 || weigths < 0) {
+    void addProcess(int pid, int creation_time, int burst_time, int weights) {              // Método para adicionar um processo à fila de pendentes
+        if (creation_time < 0 || burst_time < 0 || weights < 0)
+        {
             std::cerr << "Erro: creation_time, burst_time e weights devem ser não-negativos.\n";
             return;
         }
 
-        ScheduledProcess p(pid, creation_time, burst_time, weigths);
+        ScheduledProcess p(pid, creation_time, burst_time, weights);
         pending_processes.push_back(p);
     }
 
@@ -121,32 +122,89 @@ class PriorityScheduler {
 };
 
 
+class FileReader {
+public:
+    std::string filename;
+    std::string algorithm;
+    int quantum;
+    std::vector<int> ticket_values;
+    std::vector<int> pids;
+    std::vector<int> burst_times;
+    std::vector<int> creation_times;
+
+    FileReader(const std::string& filename) {
+        this->filename = filename;
+    }
+
+    void read_file() {
+        std::ifstream file(filename);
+        std::string line;
+
+        if (!file.is_open()) {
+            std::cerr << "Error opening file." << std::endl;
+            return;
+        }
+
+        if (std::getline(file, line)) {
+            std::stringstream ss(line);
+            std::getline(ss, algorithm, '|');
+            std::string quantum_str;
+            std::getline(ss, quantum_str);
+            quantum = std::stoi(quantum_str);
+        }
+
+        while (std::getline(file, line)) {
+            std::stringstream ss(line);
+            std::string token;
+            int pid, creation_time, burst_time, ticket_value;
+
+            std::getline(ss, token, '|');
+            creation_time = std::stoi(token);
+
+            std::getline(ss, token, '|');
+            pid = std::stoi(token);
+
+            std::getline(ss, token, '|');
+            burst_time = std::stoi(token);
+
+            std::getline(ss, token);
+            ticket_value = std::stoi(token);
+
+            creation_times.push_back(creation_time);
+            pids.push_back(pid);
+            burst_times.push_back(burst_time);
+            ticket_values.push_back(ticket_value);
+        }
+        file.close();
+    }
+};
+
 
 int main(){
 
     char num_P;
+    std::string filename = "entradaEscalonador.txt";
 
-    std::cout << "Selecione o tipo de algoritmo que você deseja aplicar no seu processo : \n";
-    std::cout << "1 - Alternância circular \n";
+    std::cout << "Selecione o tipo de algoritmo que voce deseja aplicar no seu processo : \n";
+    std::cout << "1 - Alternancia circular \n";
     std::cout << "2 - Prioridade \n";
     std::cout << "3 - Loteria \n";
     std::cout << "4 - CFS (Completely Fair Scheduler) \n";
-    std::cin >> num_P; 
+    std::cin >> num_P;
 
-    switch (num_P) {
+    FileReader reader(filename);
+    reader.read_file();
+    switch  (num_P) {
         case '1':
-            std::cout << "Você escolheu o algoritmo de Alternância Circular.\n";
-            break;
+            std::cout << "Voce escolheu o algoritmo de Alternância Circular.\n";
+            break; // Adicione este break
         case '2':{
-            std::cout << "Você escolheu o algoritmo de Prioridade.\n";
-
-            int quantum = 2; // Quantum fixo de exemplo
-            PriorityScheduler scheduler(quantum);
-
-            scheduler.addProcess(1, 0, 5, 2);
-            scheduler.addProcess(2, 2, 3, 1);
-            scheduler.addProcess(3, 1, 2, 3);
-
+            std::cout << "Voce escolheu o algoritmo de Prioridade.\n";
+            PriorityScheduler scheduler(reader.quantum);
+            for (size_t i = 0; i < reader.pids.size(); ++i) {
+                scheduler.addProcess(reader.pids[i], reader.creation_times[i],
+                                     reader.burst_times[i], reader.ticket_values[i]);
+            }
             scheduler.run();
             break;
         }
