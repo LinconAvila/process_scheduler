@@ -4,8 +4,7 @@
 #include <string>
 #include <vector>
 
-
-class ScheduledProcess {
+class Process {
 public:
     int pid;
     int creation_time;
@@ -14,10 +13,13 @@ public:
     int start_time;
     int end_time;
     int ready_time;
+    bool is_ready;
+    bool is_finished;
     int tickets;
     int weights;
+    int total_waiting_time;
 
-    ScheduledProcess(int pid, int creation_time, int burst_time, int tickets = 0) {
+    Process(int pid, int creation_time, int burst_time, int tickets = 0) {
         this->pid = pid;
         this->creation_time = creation_time;
         this->burst_time = burst_time;
@@ -27,25 +29,27 @@ public:
         this->ready_time = creation_time;
         this->tickets = tickets;
         this->weights = tickets;
+        this->is_ready = false;
+        this->is_finished = false;
+        this->total_waiting_time = 0;
     }
 };
 
 class PriorityScheduler {
     private:
-        std::vector<ScheduledProcess> ready_queue;                  // Fila de processos prontos
-        std::vector<ScheduledProcess> pending_processes;        // Fila de processos pendentes  
-        std::vector<ScheduledProcess> finalizados;           // Fila de processos finalizados
+        std::vector<Process> ready_queue;                                                                            // Fila de processos prontos
+        std::vector<Process> pending_processes;                                                                      // Fila de processos pendentes  
+        std::vector<Process> finalizados;                                                                            // Fila de processos finalizados
         int current_time = 0;
-        int quantum;                                        // Quantum fixo para o escalonamento  = fração de cpu que cada processo pode usar antes de ser interrompido
+        int quantum;                                                                                                          // Quantum fixo para o escalonamento  = fração de cpu que cada processo pode usar antes de ser interrompido
 
     public:
-        PriorityScheduler(int q) : quantum(q) {}                // Construtor que recebe o quantum
-    // Método para inserir um processo na fila de prontos com base na prioridade
+        PriorityScheduler(int q) : quantum(q) {}                                                                              // Construtor que recebe o quantum  //Método para inserir um processo na fila de prontos com base na prioridade
 
-        void insert_by_priority(std::vector<ScheduledProcess>& q, const ScheduledProcess& p) {
+        void insert_by_priority(std::vector<Process>& q, const Process& p) {
         auto it = q.begin();
         while (it != q.end()) {
-            if (it->weights > p.weights) {                  // Prioridade mais alta (menor valor de weights) se for o inverso é a maior valor de weights que é a priridade
+            if (it->weights > p.weights) {                                                                                     // Prioridade mais alta (menor valor de weights) se for o inverso é a maior valor de weights que é a priridade
                 ++it;
             } else if (it->weights == p.weights && it->creation_time < p.creation_time) {
                 ++it;
@@ -55,33 +59,33 @@ class PriorityScheduler {
         }
         q.insert(it, p);
     }
-    void addProcess(int pid, int creation_time, int burst_time, int weights) {              // Método para adicionar um processo à fila de pendentes
+    void addProcess(int pid, int creation_time, int burst_time, int weights) {                                                 // Método para adicionar um processo à fila de pendentes
         if (creation_time < 0 || burst_time < 0 || weights < 0)
         {
             std::cerr << "Erro: creation_time, burst_time e weights devem ser não-negativos.\n";
             return;
         }
 
-        ScheduledProcess p(pid, creation_time, burst_time, weights);
-        pending_processes.push_back(p);
+        Process p(pid, creation_time, burst_time, weights);                                                          // Cria um novo processo
+        pending_processes.push_back(p);                                                                                       // Adiciona o processo à fila de pendentes
     }
 
     void run() {
         std::cout << "Executando Priority Scheduler...\n";
 
-        while (!ready_queue.empty() || !pending_processes.empty()) {
+    while (!ready_queue.empty() || !pending_processes.empty()) {                                                              // Enquanto houver processos prontos ou pendentes
             // Mover processos pendentes para a fila de prontos
-            for (auto it = pending_processes.begin(); it != pending_processes.end();){
+            for (auto it = pending_processes.begin(); it != pending_processes.end();){                                        // Percorre a lista de processos pendentes
                 if (it->creation_time <= current_time) {
                     insert_by_priority(ready_queue, *it);
-                    it = pending_processes.erase(it); // Remove o processo da lista de pendentes
+                    it = pending_processes.erase(it);                                                                         // Remove o processo da lista de pendentes
                 } else {
-                    ++it; // Avança para o próximo processo
+                    ++it;                                                                                                     // Avança para o próximo processo
                 }
             }
 
-            if (!ready_queue.empty()) {
-                ScheduledProcess p = ready_queue.front();
+            if (!ready_queue.empty()) {                                                                                       // Se houver processos prontos
+                Process p = ready_queue.front();
                 ready_queue.erase(ready_queue.begin());
 
                 if (p.start_time == -1) {
@@ -97,14 +101,14 @@ class PriorityScheduler {
 
                 if (p.remaining_time > 0) {
                     p.ready_time = current_time;
-                    insert_by_priority(ready_queue, p); // Reinsere o processo na fila de prontos
+                    insert_by_priority(ready_queue, p);                                                                       // Reinsere o processo na fila de prontos
                 } else {
                     p.end_time = current_time;
-                    finalizados.push_back(p); // Processo finalizado
+                    finalizados.push_back(p);                                                                                // Processo finalizado
                 }
-            } else {
+            } else {                                                                                                         // Se não houver processos prontos, avança o tempo
                 std::cout << "Tempo " << current_time << ": Nenhum processo pronto para executar.\n";
-                current_time++; // Avança o tempo se não houver processos prontos
+                current_time++;                                                                                              // Avança o tempo se não houver processos prontos
             }
 
         }
