@@ -1,36 +1,155 @@
 #include <iostream>
 
-class Process {
+// prototipos classes enuns e structures
+class Node;
+class Tree;
+class Schedule;
+enum Color;
+enum ProcessState;
+
+
+class Process
+{
 public:
+    Process(int pid, int creation_time, int burst_time, int tickets = 0);
+    int get_pid() const;
+    int get_creation_time() const;
+    int get_end_time() const;
+    int get_total_waiting_time() const;
+
+private:
     int pid;
     int creation_time;
     int burst_time;
     int remaining_time;
     int start_time;
     int end_time;
-    int ready_time;
+    bool is_finished;
     int tickets;
     int weights;
+    int total_waiting_time;
 
-    Process(int pid, int creation_time, int burst_time, int tickets = 0) {
-        this->pid = pid;
-        this->creation_time = creation_time;
-        this->burst_time = burst_time;
-        this->remaining_time = burst_time;
-        this->start_time = -1;
-        this->end_time = -1;
-        this->ready_time = creation_time;
-        this->tickets = tickets;
-        this->weights = tickets;
-    }
+    // leco aqui vai ter alteracões para o meu funcionar
+    long double vruntime; // Adicionado para o CFS
+    ProcessState state;   // Adicionado para o CFS
+
+    friend class LotteryScheduler;
+    friend class PriorityScheduler;
+    friend struct CompareProcessPriority;
 };
+
+Process::Process(int pid, int creation_time, int burst_time, int tickets)
+{
+    this->pid = pid;
+    this->creation_time = creation_time;
+    this->burst_time = burst_time;
+    this->remaining_time = burst_time;
+    this->start_time = -1;
+    this->end_time = -1;
+    this->tickets = tickets;
+    this->weights = tickets;
+    this->is_finished = false;
+    this->total_waiting_time = 0;
+}
+
+int Process::get_pid() const { return pid; }
+int Process::get_end_time() const { return end_time; }
+int Process::get_creation_time() const { return creation_time; }
+int Process::get_total_waiting_time() const { return total_waiting_time; }
+
+// Classe para ler o arquivo de entrada e armazenar os dados dos processos
+
+class FileReader
+{
+public:
+    FileReader(const std::string &filename);
+    void read_file();
+    std::string get_algorithm() const;
+    int get_quantum() const;
+    const std::vector<int> &get_pids() const;
+    const std::vector<int> &get_creation_times() const;
+    const std::vector<int> &get_burst_times() const;
+    const std::vector<int> &get_ticket_values() const;
+
+private:
+    std::string filename;
+    std::string algorithm;
+    int quantum;
+    std::vector<int> ticket_values;
+    std::vector<int> pids;
+    std::vector<int> burst_times;
+    std::vector<int> creation_times;
+};
+
+FileReader::FileReader(const std::string &filename)
+{
+    this->filename = filename;
+    this->quantum = 0;
+}
+
+void FileReader::read_file()
+{
+    std::ifstream file(filename);
+    std::string line;
+
+    if (!file.is_open())
+    {
+        std::cerr << "Erro ao abrir o arquivo: " << filename << std::endl;
+        return;
+    }
+
+    if (std::getline(file, line))
+    {
+        std::stringstream ss(line);
+        std::getline(ss, algorithm, '|');
+        std::string quantum_str;
+        std::getline(ss, quantum_str);
+        quantum = std::stoi(quantum_str);
+    }
+
+    while (std::getline(file, line))
+    {
+        std::stringstream ss(line);
+        std::string token;
+        int pid_val, creation_time_val, burst_time_val, ticket_value;
+
+        std::getline(ss, token, '|');
+        creation_time_val = std::stoi(token);
+        std::getline(ss, token, '|');
+        pid_val = std::stoi(token);
+        std::getline(ss, token, '|');
+        burst_time_val = std::stoi(token);
+        std::getline(ss, token);
+        ticket_value = std::stoi(token);
+
+        creation_times.push_back(creation_time_val);
+        pids.push_back(pid_val);
+        burst_times.push_back(burst_time_val);
+        ticket_values.push_back(ticket_value);
+    }
+    file.close();
+}
+
+std::string FileReader::get_algorithm() const { return algorithm; }
+int FileReader::get_quantum() const { return quantum; }
+const std::vector<int> &FileReader::get_pids() const { return pids; }
+const std::vector<int> &FileReader::get_creation_times() const { return creation_times; }
+const std::vector<int> &FileReader::get_burst_times() const { return burst_times; }
+const std::vector<int> &FileReader::get_ticket_values() const { return ticket_values; }
+
 
 // definindo as cores dos nodos 
 enum Color {Red, Black};
 
+enum ProcessState {
+    READY,
+    RUNNING,
+    TERMINATED
+};
+
 class Node {
     public:
-        Process* Process;
+        Process* process;
         Color color;
         Node* left;
         Node* right;
@@ -40,7 +159,7 @@ class Node {
             process(p), color(c), parent(par), left(nullptr), right(nullptr){}
 };
 
-class Tree{
+class Tree {
     public:
         Node* root;
         Node* NIL; // representar folhas nulas
@@ -71,7 +190,7 @@ class Tree{
             return root == NIL; 
         }
 
-        Tree() {
+        Tree::Tree() {
             // Inicializa o nó sentinela NIL
             NIL = new Node(nullptr, Black); // NIL é um nó preto sem Processo associado
             NIL->left = NIL;
@@ -80,7 +199,13 @@ class Tree{
             root = NIL; // A árvore inicia vazia, com a raiz apontando para NIL
         }
 
-        void delete_tree_nodes(Node* node) {
+        // Implementação do Destrutor da Tree
+        Tree::~Tree() {
+            delete_tree_nodes(root);
+            delete NIL;
+        }
+
+        void Tree::delete_tree_nodes(Node* node) {
             if(node == NIL) {
                 return;
             }
@@ -90,7 +215,7 @@ class Tree{
             delete node;
         }
 
-        void rotate_left(Node* x){
+        void Tree::rotate_left(Node* x){
             Node* y = x->right;
             x->right = y->left; 
 
@@ -100,7 +225,7 @@ class Tree{
 
             y->parent = x->parent;
 
-            if(x->parent == nullptr){
+            if(x->parent == NIL){
                 root = y;
             }
 
@@ -112,11 +237,11 @@ class Tree{
                  x->parent->right = y;
             }
 
-            x->left = x;
+            y->left = x;
             x->parent = y;
         }
 
-        void rotate_right(Node* x){
+        void Tree::rotate_right(Node* x){
             Node* y = x->left;
             x->left = y->right;
 
@@ -142,7 +267,7 @@ class Tree{
             x->parent = y;
         }
 
-        void fix_insert(Node* z){
+        void Tree::fix_insert(Node* z){
             while(z->parent->color == Red){
                 Node* parent = z->parent;
                 Node* grandparent = parent->parent;
@@ -190,7 +315,7 @@ class Tree{
             root->color = Black;
         }
 
-        void insert(Process* new_process_ptr){
+        void Tree::insert(Process* new_process_ptr){
             Node* new_node = new Node(new_process_ptr, Red);
             new_node->left = NIL;
             new_node->right = NIL;
@@ -255,7 +380,7 @@ class Tree{
             while(current->left != NIL) {
                 current = current->left;
             }
-            return current->procress;
+            return current->process;
         }
 
         Node* Tree::search_node_by_pid(int pid) const {
@@ -275,7 +400,7 @@ class Tree{
             return nullptr;
         }
 
-        void transplant(Node* u, Node* v) {
+        void Tree::transplant(Node* u, Node* v) {
             if(u->parent == NIL) {
                 root = v;
             } 
@@ -377,7 +502,7 @@ class Tree{
             }
         }
 
-        void remove_process(int pid) {
+        void Tree::remove_process(int pid) {
             Node* z = search_node_by_pid(pid);
             if(z == nullptr) {
                 std::cout << "Processo com PID " << pid << " não encontrado para remoção." << std::endl;
@@ -426,80 +551,17 @@ class Tree{
             
         }
         
-        void in_order() const {
+        void Tree::in_order() const {
                 in_order_traverse(root);
             }
 
-        void in_order_traverse(Node* node) const {
+        void Tree::in_order_traverse(Node* node) const {
             if (node != NIL) {
                 in_order_traverse(node->left);
                 std::cout << "(PID:" << node->process->pid << ", vR:" << node->process->vruntime
                         << (node->color == Red ? "R) " : "B) ");
                 in_order_traverse(node->right);
             }
-}
-
-class FileReader {
-public:
-    std::string filename;
-    std::string algorithm;
-    int quantum;
-    std::vector<int> ticket_values;
-    std::vector<int> pids;
-    std::vector<int> burst_times;
-    std::vector<int> creation_times;
-
-    FileReader(const std::string& filename) {
-        this->filename = filename;
-    }
-
-    void read_file() {
-        std::ifstream file(filename);
-        std::string line;
-
-        if (!file.is_open()) {
-            std::cerr << "Error opening file." << std::endl;
-            return;
-        }
-
-        if (std::getline(file, line)) {
-            std::stringstream ss(line);
-            std::getline(ss, algorithm, '|');
-            std::string quantum_str;
-            std::getline(ss, quantum_str);
-            quantum = std::stoi(quantum_str);
-        }
-
-        while (std::getline(file, line)) {
-            std::stringstream ss(line);
-            std::string token;
-            int pid, creation_time, burst_time, ticket_value;
-
-            std::getline(ss, token, '|');
-            creation_time = std::stoi(token);
-
-            std::getline(ss, token, '|');
-            pid = std::stoi(token);
-
-            std::getline(ss, token, '|');
-            burst_time = std::stoi(token);
-
-            std::getline(ss, token);
-            ticket_value = std::stoi(token);
-
-            creation_times.push_back(creation_time);
-            pids.push_back(pid);
-            burst_times.push_back(burst_time);
-            ticket_values.push_back(ticket_value);
-        }
-        file.close();
-    }
-}; 
-
-enum ProcessState {
-    READY,
-    RUNING,
-    TERMINATED
 }
 
 class Scheduler {
