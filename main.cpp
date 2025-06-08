@@ -5,7 +5,7 @@
 #include <vector>
 
 class Process {
-public:
+    public:
     int pid;
     int creation_time;
     int burst_time;
@@ -18,7 +18,7 @@ public:
     int tickets;
     int weights;
     int total_waiting_time;
-
+    
     Process(int pid, int creation_time, int burst_time, int tickets = 0) {
         this->pid = pid;
         this->creation_time = creation_time;
@@ -35,99 +35,171 @@ public:
     }
 };
 
+struct CompareProcessPriority{
+    bool operator()(const Process& a, const Process& b) const {
+        if (a.weights != b.weights)
+        {
+            return a.weights < b.weights; // Prioridade mais alta (menor valor de weights)
+        }
+        return a.creation_time > b.creation_time; 
+    }
+};
+
 class PriorityScheduler {
     private:
         std::vector<Process> ready_queue;                                                                            // Fila de processos prontos
         std::vector<Process> pending_processes;                                                                      // Fila de processos pendentes  
         std::vector<Process> finalizados;                                                                            // Fila de processos finalizados
         int current_time = 0;
-        int quantum;                                                                                                          // Quantum fixo para o escalonamento  = fração de cpu que cada processo pode usar antes de ser interrompido
+        int quantum;                                                                                      // Quantum fixo para o escalonamento  = fração de cpu que cada processo pode usar antes de ser interrompido
+        CompareProcessPriority comparator;                                                                 // Função de comparação para ordenar os processos por prioridade
 
-    public:
-        PriorityScheduler(int q) : quantum(q) {}                                                                              // Construtor que recebe o quantum  //Método para inserir um processo na fila de prontos com base na prioridade
-
-        void insert_by_priority(std::vector<Process>& q, const Process& p) {
-        auto it = q.begin();
-        while (it != q.end()) {
-            if (it->weights > p.weights) {                                                                                     // Prioridade mais alta (menor valor de weights) se for o inverso é a maior valor de weights que é a priridade
-                ++it;
-            } else if (it->weights == p.weights && it->creation_time < p.creation_time) {
-                ++it;
-            } else {
-                break;
+        void manual_swap(Process& a, Process& b){
+            Process temp = a;
+            a = b;                                                                                                 
+            b = temp;
             }
-        }
-        q.insert(it, p);
-    }
-    void addProcess(int pid, int creation_time, int burst_time, int weights) {                                                 // Método para adicionar um processo à fila de pendentes
-        if (creation_time < 0 || burst_time < 0 || weights < 0)
-        {
-            std::cerr << "Erro: creation_time, burst_time e weights devem ser não-negativos.\n";
-            return;
+
+        void merge(std::vector<Process>& processes, int left, int mid, int right) {
+                int n1 = mid - left + 1;
+                int n2 = right - mid;
+
+                std::vector<Process> L, R;
+                L.reserve(n1);
+                R.reserve(n2);
+
+                for (int i = 0; i < n1; i++) {
+                    L.push_back(processes[left + i]);
+                }
+                for (int j = 0; j < n2; j++) {
+                    R.push_back(processes[mid + 1 + j]);
+                }
+
+                int i = 0, j = 0;
+                int k = left;
+                while (i < n1 && j < n2) {
+                    if (L[i].creation_time <= R[j].creation_time) {
+                        processes[k++] = L[i++];
+                    } else {
+                        processes[k++] = R[j++];
+                    }
+                }
+                while (i < n1) processes[k++] = L[i++];
+                while (j < n2) processes[k++] = R[j++];
+            }
+
+        void merge_sort(std::vector<Process>& processes, int left, int right) {
+            if (left >= right) {
+                return; // Condição de parada: a sub-lista tem 0 ou 1 elemento.
+            }
+
+            int mid = left + (right - left) / 2;
+            
+
+            merge_sort(processes, left, mid);
+            merge_sort(processes, mid + 1, right);
+            
+
+            merge(processes, left, mid, right);
         }
 
-        Process p(pid, creation_time, burst_time, weights);                                                          // Cria um novo processo
-        pending_processes.push_back(p);                                                                                       // Adiciona o processo à fila de pendentes
+        void heapify_up(int index){ 
+            if (index == 0) return;                                                                      // Se o índice for 0, não há pai para comparar
+            int parent_index = (index - 1) / 2;                                                            // Índice do pai
+
+            if (comparator(ready_queue[parent_index], ready_queue[index])) {
+                manual_swap(ready_queue[parent_index], ready_queue[index]);                            // Troca o processo atual com o pai se a prioridade do pai for menor que a do filho
+                heapify_up(parent_index);                                                         // Recursivamente aplica o heapify_up no pai
+            }
+
+    
+        }
+        void heapify_down(int index) {
+            int left_child_index = 2 * index + 1; // Índice do filho esquerdo
+            int right_child_index = 2 * index + 2; // Índice do filho direito
+            int largest = index; // Inicializa o maior como o índice atual
+
+            if (left_child_index < ready_queue.size() && comparator(ready_queue[largest], ready_queue[left_child_index])) {
+                largest = left_child_index; // Se o filho esquerdo for maior, atualiza o maior
+            }
+            if (right_child_index < ready_queue.size() && comparator(ready_queue[largest], ready_queue[right_child_index])) {
+                largest = right_child_index; // Se o filho direito for maior, atualiza o maior
+            }
+            
+            if (largest != index ){
+                manual_swap(ready_queue[index], ready_queue[largest]); // Troca o processo atual com o maior filho
+                heapify_down(largest); // Recursivamente aplica o heapify_down no maior filho
+            }
+    }
+    public:
+    PriorityScheduler(int q) : quantum(q) {}
+
+    void addProcess(int pid, int creation_time, int burst_time, int priority) {
+        pending_processes.emplace_back(pid, creation_time, burst_time, priority);
     }
 
     void run() {
         std::cout << "Executando Priority Scheduler...\n";
-
-    while (!ready_queue.empty() || !pending_processes.empty()) {                                                              // Enquanto houver processos prontos ou pendentes
-            // Mover processos pendentes para a fila de prontos
-            for (auto it = pending_processes.begin(); it != pending_processes.end();){                                        // Percorre a lista de processos pendentes
+        if (!pending_processes.empty()) {
+            merge_sort(pending_processes, 0, pending_processes.size() - 1);
+        }
+        while (!ready_queue.empty() || !pending_processes.empty()) {                                                              // Enquanto houver processos prontos ou pendentes
+            auto it = pending_processes.begin();
+            while (it != pending_processes.end()){
                 if (it->creation_time <= current_time) {
-                    insert_by_priority(ready_queue, *it);
-                    it = pending_processes.erase(it);                                                                         // Remove o processo da lista de pendentes
+                    ready_queue.push_back(*it);                                                          // Adiciona o processo à fila de prontos
+                    heapify_up(ready_queue.size() - 1);          // Reorganiza a fila de prontos após inserir o novo processo
+                
+                    it = pending_processes.erase(it);                                                                // Remove o processo da lista de pendentes
                 } else {
-                    ++it;                                                                                                     // Avança para o próximo processo
+                    break;
                 }
             }
+            
 
             if (!ready_queue.empty()) {                                                                                       // Se houver processos prontos
                 Process p = ready_queue.front();
-                ready_queue.erase(ready_queue.begin());
-
+                manual_swap(ready_queue.front(), ready_queue.back()); // Move o último processo para o início
+                ready_queue.pop_back(); // Remove o último processo (agora no início)
+                if (!ready_queue.empty()) {
+                    heapify_down(0); // Reorganiza a fila de prontos após remover o processo
+                }
                 if (p.start_time == -1) {
                     p.start_time = current_time;
                 }
                 int execution_time = (quantum < p.remaining_time) ? quantum : p.remaining_time;
-
-                std::cout << "Tempo " << current_time << ": Executando PID " << p.pid
-                          << " por " << execution_time << " unidades de tempo\n";
-
                 current_time += execution_time;
                 p.remaining_time -= execution_time;
 
-                if (p.remaining_time > 0) {
-                    p.ready_time = current_time;
-                    insert_by_priority(ready_queue, p);                                                                       // Reinsere o processo na fila de prontos
-                } else {
+                if (p.remaining_time > 0){
+                    ready_queue.push_back(p);                                                                       // Reinsere o processo na fila de prontos
+                    heapify_up(ready_queue.size() - 1); // Reorganiza a fila de prontos após inserir o processo
+                }else{
                     p.end_time = current_time;
                     finalizados.push_back(p);                                                                                // Processo finalizado
                 }
+
             } else {                                                                                                         // Se não houver processos prontos, avança o tempo
                 std::cout << "Tempo " << current_time << ": Nenhum processo pronto para executar.\n";
                 current_time++;                                                                                              // Avança o tempo se não houver processos prontos
             }
-
-        }
-        std::cout << "\nResumo da execução:\n";
+        } // Fim do while principal
+        std::cout << "\nResumo da execucao:\n";
         for (const auto& p : finalizados) {
             std::cout << "PID " << p.pid
                     << " | Criado: " << p.creation_time
                     << " | Inicio: " << p.start_time
                     << " | Fim: " << p.end_time
-                    << " | Espera: " << (p.start_time - p.creation_time)
+                    << " | Espera: " << (p.end_time - p.creation_time) - p.burst_time
                     << " | Retorno: " << (p.end_time - p.creation_time)
                     << "\n";
         }
-    }
+        std::cout << "Tempo total de execucao: " << current_time << " unidades de tempo.\n";
+        }
 };
 
-
 class FileReader {
-public:
+    public:
     std::string filename;
     std::string algorithm;
     int quantum;
@@ -182,7 +254,6 @@ public:
         file.close();
     }
 };
-
 
 int main(){
 
