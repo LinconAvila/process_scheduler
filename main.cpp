@@ -290,7 +290,7 @@ class Tree{
             } 
         }
 
-        void RedBlackTree::fix_delete(Node* x) {
+        void Tree::fix_delete(Node* x) {
             // A correção da árvore após a remoção de um nó preto (`original_y_color == Black`)
             // é necessária para manter as propriedades da Árvore Rubro-Negra.
             // O nó `x` é o que "substituiu" o nó removido ou movido, e pode ser um nó de "duplo-preto" virtual.
@@ -504,30 +504,285 @@ enum ProcessState {
 
 class Scheduler {
     public:
-        Tree red_black_tree;
+        Tree run_queue;
         Process* current_process;
+
+        // Lista de todos os processos conhecidos pelo scheduler (para gerenciar vida útil)
+        std::vector<Process*> all_processes; 
+
         int system_vruntime_min;
         int total_active_weight; 
         // verificar modificação dps
         int TARGET_LATENCY;
         int MIN_GRANULARITY;
-        std::SCHED_HZ; // lógica Fake dos ciclos da CPU
 
-        Scheduler(){
+        std::SCHED_HZ; // adptar para o metodo de geral depois 
+        
+        Scheduler() : current_process(nullptr), system_vruntime_min(0), total_active_weight(0), SCHED_HZ(0) {
+        // A run_queue já é inicializada pelo seu próprio construtor.
+        }
+
+        ~Scheduler() {
+            // Libera a memória de todos os objetos Processo alocados dinamicamente
+            for (Process* p : all_processes) {
+                delete p;
+            }
+            all_processes.clear();
+        }
+
+        void init_scheduler(init quantum_from_file) {
+           // Limpa processos antigos se init for chamado múltiplas vezes
+            for (Process* p : all_processes) {
+                delete p; 
+            }
+
+            all_process* p : all_processes.clear();
+
+            // Re-inicializa a run_queue criando uma nova instância (chama o destrutor da antiga)
+            run_queue = RedBlackTree(); 
+
             current_process = nullptr;
             system_vruntime_min = 0;
             total_active_weight = 0;
+            SCHED_HZ = quantum_from_file; // Usando o quantum do arquivo como base para SCHED_HZ
 
-            TARGET_LATENCY = 0;
-            MIN_GRANULARITY = 0;
+            std::cout << "Scheduler inicializado com Quantum/SCHED_HZ: " << SCHED_HZ << "ms." << std::endl;
+    
 
         }
 
-        void add_process
+        void add_process(init pid, int creation_time, int burst_time, int tickets) {
+            Process* new_process = new Process(pid, creation_time, burst_time, tickets);
+            all_processes.push_back(new_process); // Adiciona à lista de todos os processos 
+
+            // Para a simulação, vamos inicializar o vruntime de todos os processos ao adicionar.
+            // Em um sistema real, o vruntime de um novo processo (forked) é o do pai,
+            // ou o min_vruntime do sistema se for um processo novo.
+            if (!run_queue.is_empty()) {
+                new_process->vruntime = run_queue.get_min_vruntime_process()->vruntime;
+            } 
+            else {
+                new_process->vruntime = system_vruntime_min;
+            }
+            
+            run_queue.insert(new_process); // Insere o ponteiro na árvore RB
+            total_active_weight += new_process->weights; // Atualiza o peso total ativo
+
+            std::cout << "Processo " << new_process->pid << " (peso: " << new_process->weights << ") adicionado ao scheduler. vruntime inicial: " << new_process->vruntime << std::endl;
+        }
+
+        Process* pick_next_task() {
+            if (run_queue.is_empty()) {
+                current_process = nullptr;
+                return nullptr; // Nenhuma tarefa pronta
+            }
+
+            Process* next_task_ptr = run_queue.get_min_vruntime_process(); // Obtém o ponteiro para o processo com menor vruntime
+            
+            // Remove o nó correspondente a este processo da run_queue.
+            run_queue.remove_process(next_task_ptr->pid); // Remove o nó da árvore RB
+            
+            current_process = next_task_ptr;
+            current_process->state = RUNNING;
+            return current_process;
+        }
+
+        void schedule_tick(long long delta_time) {
+        // 1. Se não há processo rodando, escolha o próximo
+        if (current_process == nullptr) {
+            current_process = pick_next_task();
+            if (current_process == nullptr) {
+                // Nenhum processo pronto para executar, sistema ocioso.
+                system_vruntime_min += delta_time; // Avança o vruntime mínimo do sistema
+                return;
+            }
+            std::cout << "--> Iniciando processo PID: " << current_process->pid << " (vR: " << current_process->vruntime << ")" << std::endl;
+            if (current_process->start_time == -1) {
+                current_process->start_time = current_time_global; // Registrar tempo de início real
+            }
+        }
+
+        // 2. Atualiza o vruntime do processo atual
+        // vruntime_increment = delta_time * (NICE_0_WEIGHT_APPROX / current_process->weights)
+        long double vruntime_increment = static_cast<long double>(delta_time) * (NICE_0_WEIGHT_APPROX / current_process->weights);
+        current_process->vruntime += vruntime_increment;
+        current_process->remaining_time -= delta_time;
+
+        // 3. Atualiza o vruntime mínimo do sistema
+        // O system_vruntime_min deve ser o vruntime do nó mais à esquerda da árvore RB.
+        // É a referência para o tempo "ideal" que o processo mais justo deveria ter.
+        if (!run_queue.is_empty()) {
+            // Compara o vruntime do processo atual com o menor da fila
+            system_vruntime_min = std::min(current_process->vruntime, run_queue.get_min_vruntime_process()->vruntime);
+        } else {
+            // Se a fila está vazia, o processo atual é a única referência
+            system_vruntime_min = current_process->vruntime; 
+        }
+
+        // 4. Verifica o término do processo
+        if (current_process->remaining_time <= 0) {
+            current_process->state = TERMINATED;
+            total_active_weight -= current_process->weights; // Remove o peso do processo terminado
+            current_process->end_time = current_time_global + delta_time; // Registrar tempo de término real
+            std::cout << "<-- Processo PID: " << current_process->pid << " TERMINOU." << std::endl;
+            
+            current_process = nullptr; // CPU livre
+            current_process = pick_next_task(); // Escolhe o próximo imediatamente
+            if (current_process) {
+                std::cout << "--> Iniciando processo PID: " << current_process->pid << " (vR: " << current_process->vruntime << ")" << std::endl;
+                if (current_process->start_time == -1) {
+                    current_process->start_time = current_time_global + delta_time;
+                }
+            }
+            return; // Retorna para o próximo tick, um novo processo já está executando ou CPU ociosa
+        }
+
+        // 5. Verifica a preempção (context switch)
+        // Se há outros processos na fila E o vruntime do processo atual é maior que o do processo mais justo na fila.
+        if (!run_queue.is_empty()) {
+            Process* next_in_queue = run_queue.get_min_vruntime_process();
+            // A preempção ocorre se o processo atual está "atrasando" outros processos
+            // A condição é que o vruntime do processo atual seja maior que o do próximo na fila
+            // mais uma pequena margem (MIN_GRANULARITY para evitar oscilações excessivas).
+            if (current_process->vruntime > next_in_queue->vruntime + MIN_GRANULARITY) {
+                
+                // Reinserir o processo atual na run_queue (ele será ordenado pelo novo vruntime)
+                run_queue.insert(current_process); 
+                current_process->state = READY; // Volta para estado de pronto
+                std::cout << "<-- Processo PID: " << current_process->pid << " preempção (vR: " << current_process->vruntime << " vs. " << next_in_queue->vruntime << "). " << std::endl;
+                
+                // Escolhe o próximo processo
+                current_process = pick_next_task();
+                if (current_process) {
+                    std::cout << "--> Iniciando processo PID: " << current_process->pid << " (vR: " << current_process->vruntime << ")" << std::endl;
+                    if (current_process->start_time == -1) {
+                        current_process->start_time = current_time_global + delta_time;
+                    }
+                }
+            }
+        }
+    }
+
+    // calculate_time_slice não é estritamente necessário para o CFS em si,
+    // pois a preempção é baseada no vruntime, mas mantido para referência.
+    long double calculate_time_slice(const Process& p) const {
+        if (total_active_weight == 0) {
+            return MIN_GRANULARITY; // Evita divisão por zero
+        }
+        long double base_time_slice = (static_cast<long double>(p.weights) / total_active_weight) * TARGET_LATENCY;
+        if (base_time_slice < MIN_GRANULARITY) {
+            base_time_slice = MIN_GRANULARITY;
+        }
+        return base_time_slice;
+    }
+     
+    void print_scheduler_state() const {
+        std::cout << "\n--- Estado Atual do Scheduler (Tick: " << SCHED_HZ << "ms) ---" << std::endl;
+        std::cout << "Tempo Virtual Mínimo do Sistema (system_vruntime_min): " << system_vruntime_min << std::endl;
+        std::cout << "Peso Total Ativo (total_active_weight): " << total_active_weight << std::endl;
+
+        if (current_process) {
+            std::cout << "Processo Atualmente Executando:" << std::endl;
+            current_process->print_info();
+        } else {
+            std::cout << "CPU Ociosa (Nenhum processo executando)." << std::endl;
+        }
+
+        std::cout << "\nFila de Processos Prontos (Run Queue - RB Tree In-Order):" << std::endl;
+        run_queue.in_order(); // Chama o método in_order da RB Tree
+        if (run_queue.is_empty()) {
+            std::cout << "  (Vazia)" << std::endl;
+        }
+
+        std::cout << "\nTodos os Processos Conhecidos (incluindo terminados):" << std::endl;
+        if (all_processes.empty()) {
+            std::cout << "  (Nenhum processo conhecido)" << std::endl;
+        } else {
+            for (const auto& p_ptr : all_processes) {
+                std::cout << "  ";
+                p_ptr->print_info();
+            }
+        }
+        std::cout << "--------------------------------------------------------\n" << std::endl;
+    }
+};
+
+// Variável global para o tempo atual da simulação (para start_time/end_time)
+long long current_time_global = 0; 
+        
 
 
 }
-int main(){
 
+    
+int main(){
+    // Exemplo de uso: o usuário deve fornecer o caminho para o arquivo de entrada
+    std::string input_filename = "entradaEscalonador.txt"; // Nome do arquivo de entrada padrão
+
+    // Para simulação, você pode criar este arquivo manualmente ou usar o script Python 'geradorEntrada.py'
+    // Exemplo de conteúdo para 'entradaEscalonador.txt':
+    // CFS|10
+    // 0|1|100|100   (creation_time|pid|burst_time|tickets)
+    // 0|2|200|50
+    // 0|3|50|200
+
+    FileReader file_reader(input_filename);
+    file_reader.read_file();
+
+    if (file_reader.pids.empty()) {
+        std::cerr << "Nenhum processo lido do arquivo. Saindo." << std::endl;
+        return 1;
+    }
+
+    Scheduler scheduler;
+    scheduler.init_scheduler(file_reader.quantum); // Passa o quantum lido para o scheduler
+
+    // Adiciona os processos lidos do arquivo ao scheduler
+    for (size_t i = 0; i < file_reader.pids.size(); ++i) {
+        scheduler.add_process(
+            file_reader.pids[i],
+            file_reader.creation_times[i],
+            file_reader.burst_times[i],
+            file_reader.ticket_values[i]
+        );
+    }
+
+    // O delta_time para a simulação é o quantum lido do arquivo
+    long long delta_time = scheduler.SCHED_HZ; 
+
+    // Simular por um tempo máximo ou até todos os processos terminarem
+    long long max_simulation_time = 1000; // Por exemplo, simular por 1000ms
+
+    std::cout << "\nIniciando simulação do CFS..." << std::endl;
+
+    while (current_time_global < max_simulation_time) {
+        std::cout << "\n==========================================" << std::endl;
+        std::cout << "Tempo de Simulação Atual: " << current_time_global << "ms" << std::endl;
+
+        scheduler.schedule_tick(delta_time);
+        scheduler.print_scheduler_state();
+        
+        current_time_global += delta_time; // Atualiza o tempo global da simulação
+
+        // Condição de parada: todos os processos terminaram
+        bool all_terminated = true;
+        for (const auto& p_ptr : scheduler.all_processes) {
+            if (p_ptr->state != TERMINATED) {
+                all_terminated = false;
+                break;
+            }
+        }
+        if (all_terminated) {
+            std::cout << "Todos os processos terminaram!" << std::endl;
+            break;
+        }
+
+        // Adiciona um pequeno atraso para facilitar a leitura na console (opcional)
+        // std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
+    }
+
+    std::cout << "\nSimulação CFS finalizada." << std::endl;
+
+    
     return 0;
 }
