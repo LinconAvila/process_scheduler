@@ -2,209 +2,48 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <iomanip>
+#include <cstdlib>
 #include <vector>
+#include <ctime>
 
-class Process {
+class LotteryScheduler;
+
+class Process
+{
 public:
+    Process(int pid, int creation_time, int burst_time, int tickets = 0);
+    int get_pid() const;
+    int get_creation_time() const;
+    int get_end_time() const;
+    int get_total_waiting_time() const;
+
+private:
     int pid;
     int creation_time;
     int burst_time;
     int remaining_time;
     int start_time;
     int end_time;
-    int ready_time;
-    bool is_ready;
     bool is_finished;
     int tickets;
-    int weights;
     int total_waiting_time;
-
-    Process(int pid, int creation_time, int burst_time, int tickets = 0) {
-        this->pid = pid;
-        this->creation_time = creation_time;
-        this->burst_time = burst_time;
-        this->remaining_time = burst_time;
-        this->start_time = -1;
-        this->end_time = -1;
-        this->ready_time = creation_time;
-        this->tickets = tickets;
-        this->weights = tickets;
-        this->is_ready = false;
-        this->is_finished = false;
-        this->total_waiting_time = 0;
-    }
+    friend class LotteryScheduler;
 };
 
-class LotteryScheduler {
+class FileReader
+{
 public:
-    std::vector<Process> processes;
-    std::vector<Process*> ready_queue;
-    int quantum;
-    int total_tickets;
-    int current_time;
+    FileReader(const std::string &filename);
+    void read_file();
+    std::string get_algorithm() const;
+    int get_quantum() const;
+    const std::vector<int> &get_pids() const;
+    const std::vector<int> &get_creation_times() const;
+    const std::vector<int> &get_burst_times() const;
+    const std::vector<int> &get_ticket_values() const;
 
-    LotteryScheduler(int quantum) {
-        this->quantum = quantum;
-        this->total_tickets = 0;
-        this->current_time = 0;
-        std::srand(time(0)); 
-    }
-
-    void add_process(const Process& process) {
-        processes.push_back(process);
-    }
-
-    void add_ready_process(Process* process) {
-        ready_queue.push_back(process);
-        process->is_ready = true;
-        process->ready_time = current_time;
-    }
-
-    void update_total_tickets() {
-        total_tickets = 0;
-        for (auto* process : ready_queue) {
-            if (!process->is_finished) {
-                total_tickets += process->tickets;
-            }
-        }
-    }
-
-    Process* select_process() {
-        update_total_tickets();
-        if (total_tickets == 0) {
-            return nullptr; 
-        }
-
-        int selected_ticket = std::rand() % total_tickets;
-        int cumulative_tickets = 0;
-        for (auto* process : ready_queue) {
-            if (process->is_finished) {
-                continue;
-            }
-            cumulative_tickets += process->tickets;
-            if (selected_ticket < cumulative_tickets) {
-                return process; 
-            }
-        }
-        return nullptr; 
-    }
-
-
-    bool all_finished() {
-        for (const auto& process : processes) {
-            if (!process.is_finished) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // Selection sort para ordenar os processos conforme o tempo de criação
-    void sort_creation_time(){
-        int n = processes.size();
-        for(int i = 0; i < n - 1; i++) {
-            int min_index = i;
-            for(int j = i + 1; j < n; j++) {
-                if(processes[j].creation_time < processes[min_index].creation_time) {
-                    min_index = j;
-                }
-            }
-            if (min_index != i) {
-                Process temp = processes[i];
-                processes[i] = processes[min_index];
-                processes[min_index] = temp;
-            }
-        }
-    }
-
-    void remove_ready_queue(Process* process) {
-        int index = -1;
-        for (int i = 0; i < ready_queue.size(); ++i) {
-            if (ready_queue[i] == process) {
-                index = i;
-                break;
-            }
-        }
-        if (index != -1) {
-            int last_index = ready_queue.size() - 1;
-            for(int k = index; k < last_index; ++k) {
-                ready_queue[k] = ready_queue[k + 1];
-            }
-            ready_queue.pop_back();
-        }
-    }
-    void get_new_processes(int& next_process_id) {
-        int n = processes.size();
-        while (next_process_id < n && processes[next_process_id].creation_time <= current_time) {
-            Process* new_process = &processes[next_process_id];
-            new_process->is_ready = true;
-            new_process->ready_time = current_time;
-            ready_queue.push_back(new_process);
-            next_process_id++;
-        }
-    }
-
-    void update_waiting_times(int run_time) {
-        for (auto* process : ready_queue) {
-            if (!process->is_finished) {
-                process->total_waiting_time += run_time;
-            }
-        }
-    }
-
-    void execute_quantum(){
-        Process* selected_process = select_process();
-        if (selected_process == nullptr) {
-            current_time++;
-            return; 
-        }
-
-        remove_ready_queue(selected_process);
-        selected_process->is_ready = false; 
-
-        int run_time = std::min(selected_process->remaining_time, quantum);
-
-        if (selected_process->start_time < 0) {
-            selected_process->start_time = current_time;
-        }
-
-        update_waiting_times(run_time);
-
-        selected_process->remaining_time -= run_time;
-        current_time += run_time;
-
-        if (selected_process->remaining_time == 0) {
-            selected_process->is_finished = true;
-            selected_process->end_time = current_time;
-        } else {
-            selected_process->is_ready = true;
-            selected_process->ready_time = current_time;
-            ready_queue.push_back(selected_process);
-        }
-    }
-
-    void run(){
-        sort_creation_time();
-        int next_process_id = 0;
-        int n = processes.size();
-
-        while (!all_finished()) {
-            get_new_processes(next_process_id);
-            update_total_tickets();
-
-            if (total_tickets == 0) {
-                current_time++;
-                continue; 
-            }
-
-            execute_quantum();
-        }
-    }
-        
-};
-
-class FileReader {
-public:
+private:
     std::string filename;
     std::string algorithm;
     int quantum;
@@ -212,54 +51,282 @@ public:
     std::vector<int> pids;
     std::vector<int> burst_times;
     std::vector<int> creation_times;
-
-    FileReader(const std::string& filename) {
-        this->filename = filename;
-    }
-
-    void read_file() {
-        std::ifstream file(filename);
-        std::string line;
-
-        if (!file.is_open()) {
-            std::cerr << "Error opening file." << std::endl;
-            return;
-        }
-
-        if (std::getline(file, line)) {
-            std::stringstream ss(line);
-            std::getline(ss, algorithm, '|');
-            std::string quantum_str;
-            std::getline(ss, quantum_str);
-            quantum = std::stoi(quantum_str);
-        }
-
-        while (std::getline(file, line)) {
-            std::stringstream ss(line);
-            std::string token;
-            int pid, creation_time, burst_time, ticket_value;
-
-            std::getline(ss, token, '|');
-            creation_time = std::stoi(token);
-
-            std::getline(ss, token, '|');
-            pid = std::stoi(token);
-
-            std::getline(ss, token, '|');
-            burst_time = std::stoi(token);
-
-            std::getline(ss, token);
-            ticket_value = std::stoi(token);
-
-            creation_times.push_back(creation_time);
-            pids.push_back(pid);
-            burst_times.push_back(burst_time);
-            ticket_values.push_back(ticket_value);
-        }
-        file.close();
-    }
 };
 
-int main() {
+class LotteryScheduler
+{
+public:
+    LotteryScheduler();
+    void set_algorithm_name(const std::string &name);
+    void set_quantum(int q);
+    void add_process(const Process &process);
+    void run();
+    void print_statistics();
+
+private:
+    void update_ready_queue();
+    Process *select_winner();
+    std::vector<Process> processes;
+    std::vector<Process *> ready_queue;
+    std::string algorithm_name;
+    int quantum;
+    int current_time;
+};
+
+Process::Process(int pid, int creation_time, int burst_time, int tickets)
+{
+    this->pid = pid;
+    this->creation_time = creation_time;
+    this->burst_time = burst_time;
+    this->remaining_time = burst_time;
+    this->start_time = -1;
+    this->end_time = -1;
+    this->tickets = tickets;
+    this->is_finished = false;
+    this->total_waiting_time = 0;
+}
+
+int Process::get_pid() const { return pid; }
+int Process::get_end_time() const { return end_time; }
+int Process::get_creation_time() const { return creation_time; }
+int Process::get_total_waiting_time() const { return total_waiting_time; }
+
+FileReader::FileReader(const std::string &filename)
+{
+    this->filename = filename;
+    this->quantum = 0;
+}
+
+void FileReader::read_file()
+{
+    std::ifstream file(filename);
+    std::string line;
+
+    if (!file.is_open())
+    {
+        std::cerr << "Erro ao abrir o arquivo: " << filename << std::endl;
+        return;
+    }
+
+    if (std::getline(file, line))
+    {
+        std::stringstream ss(line);
+        std::getline(ss, algorithm, '|');
+        std::string quantum_str;
+        std::getline(ss, quantum_str);
+        quantum = std::stoi(quantum_str);
+    }
+
+    while (std::getline(file, line))
+    {
+        std::stringstream ss(line);
+        std::string token;
+        int pid_val, creation_time_val, burst_time_val, ticket_value;
+
+        std::getline(ss, token, '|');
+        creation_time_val = std::stoi(token);
+        std::getline(ss, token, '|');
+        pid_val = std::stoi(token);
+        std::getline(ss, token, '|');
+        burst_time_val = std::stoi(token);
+        std::getline(ss, token);
+        ticket_value = std::stoi(token);
+
+        creation_times.push_back(creation_time_val);
+        pids.push_back(pid_val);
+        burst_times.push_back(burst_time_val);
+        ticket_values.push_back(ticket_value);
+    }
+    file.close();
+}
+
+std::string FileReader::get_algorithm() const { return algorithm; }
+int FileReader::get_quantum() const { return quantum; }
+const std::vector<int> &FileReader::get_pids() const { return pids; }
+const std::vector<int> &FileReader::get_creation_times() const { return creation_times; }
+const std::vector<int> &FileReader::get_burst_times() const { return burst_times; }
+const std::vector<int> &FileReader::get_ticket_values() const { return ticket_values; }
+
+LotteryScheduler::LotteryScheduler()
+{
+    quantum = 0;
+    current_time = 0;
+}
+
+void LotteryScheduler::set_algorithm_name(const std::string &name) { algorithm_name = name; }
+void LotteryScheduler::set_quantum(int q) { quantum = q; }
+void LotteryScheduler::add_process(const Process &process) { processes.push_back(process); }
+
+void LotteryScheduler::update_ready_queue()
+{
+    for (auto &process : processes)
+    {
+        bool in_ready_queue = false;
+        for (const auto &ready_process : ready_queue)
+        {
+            if (ready_process->get_pid() == process.get_pid())
+            {
+                in_ready_queue = true;
+                break;
+            }
+        }
+
+        if (!process.is_finished && !in_ready_queue && process.creation_time <= current_time)
+        {
+            process.total_waiting_time += (current_time - process.creation_time);
+            ready_queue.push_back(&process);
+        }
+    }
+}
+
+Process *LotteryScheduler::select_winner()
+{
+    int total_tickets = 0;
+    for (const auto &process : ready_queue)
+    {
+        total_tickets += process->tickets;
+    }
+    if (total_tickets == 0)
+    {
+        return nullptr;
+    }
+    int winning_ticket = std::rand() % total_tickets;
+    int current_ticket_sum = 0;
+    for (auto &process : ready_queue)
+    {
+        current_ticket_sum += process->tickets;
+        if (winning_ticket < current_ticket_sum)
+        {
+            return process;
+        }
+    }
+    return nullptr;
+}
+
+void LotteryScheduler::run()
+{
+    std::srand(time(0));
+
+    std::cout << "--- Iniciando Simulacao do Escalonador ---\n";
+    std::cout << "Algoritmo: " << algorithm_name << " | Fatia de CPU: " << quantum << std::endl
+              << std::endl;
+
+    while (true)
+    {
+        update_ready_queue();
+
+        bool all_finished = true;
+        for (const auto &process : processes)
+        {
+            if (!process.is_finished)
+            {
+                all_finished = false;
+                break;
+            }
+        }
+        if (all_finished)
+        {
+            std::cout << "\n--- Simulacao finalizada no tempo " << current_time << " ---\n";
+            break;
+        }
+
+        if (ready_queue.empty())
+        {
+            current_time++;
+            continue;
+        }
+
+        Process *winner = select_winner();
+        if (winner == nullptr)
+        {
+            current_time++;
+            continue;
+        }
+        if (winner->start_time == -1)
+        {
+            winner->start_time = current_time;
+        }
+
+        int time_to_run = std::min(winner->remaining_time, quantum);
+
+        std::cout << "Tempo[" << std::setw(3) << current_time << " -> " << std::setw(3) << current_time + time_to_run << "]: "
+                  << "Processo " << winner->get_pid() << " esta na CPU. (Restante: "
+                  << winner->remaining_time - time_to_run << ")" << std::endl;
+
+        for (Process *process : ready_queue)
+        {
+            if (process->get_pid() != winner->get_pid())
+            {
+                process->total_waiting_time += time_to_run;
+            }
+        }
+
+        current_time += time_to_run;
+        winner->remaining_time -= time_to_run;
+
+        if (winner->remaining_time <= 0)
+        {
+            winner->is_finished = true;
+            winner->end_time = current_time;
+            std::cout << ">>> Processo " << winner->get_pid() << " finalizado no tempo " << current_time << " <<<" << std::endl;
+
+            for (size_t i = 0; i < ready_queue.size(); ++i)
+            {
+                if (ready_queue[i]->get_pid() == winner->get_pid())
+                {
+                    ready_queue.erase(ready_queue.begin() + i);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void LotteryScheduler::print_statistics()
+{
+    std::cout << "\n--- Estatisticas Finais ---\n";
+    std::cout << std::left << std::setw(10) << "PID"
+              << std::setw(25) << "Tempo Total"
+              << std::setw(25) << "Tempo em Estado Pronto" << std::endl;
+    std::cout << "------------------------------------------------------------\n";
+
+    for (const auto &process : processes)
+    {
+        int turnaround_time = process.get_end_time() - process.get_creation_time();
+        int waiting_time = process.get_total_waiting_time();
+
+        std::cout << std::left << std::setw(10) << process.get_pid()
+                  << std::setw(25) << turnaround_time
+                  << std::setw(25) << waiting_time << std::endl;
+    }
+}
+
+int main()
+{
+    std::cout << "Digite o nome do arquivo de entrada: ";
+    std::string filename;
+    std::cin >> filename;
+
+    FileReader file_reader(filename);
+    file_reader.read_file();
+
+    LotteryScheduler scheduler;
+    scheduler.set_algorithm_name(file_reader.get_algorithm());
+    scheduler.set_quantum(file_reader.get_quantum());
+
+    const std::vector<int> &pids = file_reader.get_pids();
+    const std::vector<int> &creation_times = file_reader.get_creation_times();
+    const std::vector<int> &burst_times = file_reader.get_burst_times();
+    const std::vector<int> &ticket_values = file_reader.get_ticket_values();
+
+    for (size_t i = 0; i < pids.size(); ++i)
+    {
+        Process process(pids[i], creation_times[i], burst_times[i], ticket_values[i]);
+        scheduler.add_process(process);
+    }
+
+    scheduler.run();
+    scheduler.print_statistics();
+
     return 0;
 }
