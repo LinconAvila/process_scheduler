@@ -4,6 +4,7 @@
 #include <vector>
 #include <queue>
 #include <string>
+#include <iomanip>
 
 using namespace std;
 
@@ -13,12 +14,22 @@ struct Processo {
     int momentoCriacao;
     string pid;
     int tempoRestante;
-    int prioridade; // ignorado em Round Robin
+    int prioridade; // ignorado em RR
     Estado estado;
     bool criado = false;
 
     Processo(int m, string p, int t, int prio)
         : momentoCriacao(m), pid(p), tempoRestante(t), prioridade(prio), estado(PRONTO) {}
+
+    string estadoComoString() const {
+        switch (estado) {
+            case PRONTO: return "PRONTO";
+            case EXECUTANDO: return "EXECUTANDO";
+            case BLOQUEADO: return "BLOQUEADO";
+            case FINALIZADO: return "FINALIZADO";
+            default: return "DESCONHECIDO";
+        }
+    }
 };
 
 class Escalonador {
@@ -40,7 +51,7 @@ public:
     void simular() {
         while (!todosFinalizados()) {
 
-            // Criação de novos processos no tempo atual
+            // Criação de novos processos
             for (auto& p : todosProcessos) {
                 if (!p->criado && p->momentoCriacao == tempo) {
                     cout << "[Tempo " << tempo << "] Processo " << p->pid << " criado.\n";
@@ -58,11 +69,11 @@ public:
                 tempoExecutadoNoQuantum = 0;
             }
 
-            // Troca por fim de quantum ou ausência de processo atual
+            // Troca por quantum ou ausência
             if (!processoAtual || tempoExecutadoNoQuantum == quantum) {
                 if (processoAtual && processoAtual->tempoRestante > 0) {
                     processoAtual->estado = Processo::PRONTO;
-                    filaProntos.push(processoAtual); // devolve à fila
+                    filaProntos.push(processoAtual);
                 }
 
                 if (!filaProntos.empty()) {
@@ -75,15 +86,22 @@ public:
                 }
             }
 
-            // Execução do processo atual
+            // Executa o processo atual
             if (processoAtual) {
                 processoAtual->tempoRestante--;
                 tempoExecutadoNoQuantum++;
-                cout << "[Tempo " << tempo << "] Executando: " << processoAtual->pid
-                     << " | Tempo restante: " << processoAtual->tempoRestante << "\n";
-            } else {
-                cout << "[Tempo " << tempo << "] CPU ociosa.\n";
             }
+
+            // Imprime o estado de todos os processos
+            cout << "[Tempo " << tempo << "] Estado dos processos:\n";
+            for (auto& p : todosProcessos) {
+                cout << "    " << setw(4) << p->pid 
+                     << " | Estado: " << setw(11) << p->estadoComoString() 
+                     << " | Restante: " << p->tempoRestante << "\n";
+            }
+
+            if (!processoAtual)
+                cout << "[Tempo " << tempo << "] CPU ociosa.\n";
 
             tempo++;
         }
@@ -103,13 +121,11 @@ int main() {
     string algoritmo;
     int quantum;
 
-    // Leitura do cabeçalho
+    // Cabeçalho: ROUND_ROBIN|2
     getline(arquivo, linha);
     stringstream ss(linha);
     getline(ss, algoritmo, '|');
-    if (!algoritmo.empty() && algoritmo.back() == '\r') {
-        algoritmo.pop_back();
-    }
+    ss >> quantum;
 
     if (algoritmo != "ROUND_ROBIN") {
         cerr << "Erro: Este escalonador implementa apenas o algoritmo ROUND_ROBIN.\n";
