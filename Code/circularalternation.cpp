@@ -14,7 +14,6 @@ struct Processo {
     int momentoCriacao;
     string pid;
     int tempoRestante;
-    int prioridade; // ignorado em RR
     Estado estado;
     bool criado = false;
 
@@ -22,8 +21,8 @@ struct Processo {
     int tempoFinalizacao = -1;
     int tempoEmPronto = 0;
 
-    Processo(int m, string p, int t, int prio)
-        : momentoCriacao(m), pid(p), tempoRestante(t), prioridade(prio), estado(PRONTO) {}
+    Processo(int m, string p, int t)
+        : momentoCriacao(m), pid(p), tempoRestante(t), estado(PRONTO) {}
 
     string estadoComoString() const {
         switch (estado) {
@@ -163,7 +162,7 @@ int main() {
         getline(sl, tmp, '|'); tempo = stoi(tmp);
         getline(sl, tmp, '|'); prioridade = stoi(tmp);
 
-        escalonador.adicionarProcesso(new Processo(momento, pid, tempo, prioridade));
+        escalonador.adicionarProcesso(new Processo(momento, pid, tempo));
     }
 
     escalonador.simular();
