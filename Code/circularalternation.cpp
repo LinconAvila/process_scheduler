@@ -18,6 +18,10 @@ struct Processo {
     Estado estado;
     bool criado = false;
 
+    int tempoInicioExecucao = -1;
+    int tempoFinalizacao = -1;
+    int tempoEmPronto = 0;
+
     Processo(int m, string p, int t, int prio)
         : momentoCriacao(m), pid(p), tempoRestante(t), prioridade(prio), estado(PRONTO) {}
 
@@ -51,7 +55,6 @@ public:
     void simular() {
         while (!todosFinalizados()) {
 
-            // Criação de novos processos
             for (auto& p : todosProcessos) {
                 if (!p->criado && p->momentoCriacao == tempo) {
                     cout << "[Tempo " << tempo << "] Processo " << p->pid << " criado.\n";
@@ -61,15 +64,19 @@ public:
                 }
             }
 
-            // Finalização do processo atual
+            for (auto& p : todosProcessos) {
+                if (p->estado == Processo::PRONTO)
+                    p->tempoEmPronto++;
+            }
+
             if (processoAtual && processoAtual->tempoRestante == 0) {
-                cout << "[Tempo " << tempo << "] Processo " << processoAtual->pid << " finalizado.\n";
                 processoAtual->estado = Processo::FINALIZADO;
+                processoAtual->tempoFinalizacao = tempo;
+                cout << "[Tempo " << tempo << "] Processo " << processoAtual->pid << " finalizado no tempo " << tempo << ".\n";
                 processoAtual = nullptr;
                 tempoExecutadoNoQuantum = 0;
             }
 
-            // Troca por quantum ou ausência
             if (!processoAtual || tempoExecutadoNoQuantum == quantum) {
                 if (processoAtual && processoAtual->tempoRestante > 0) {
                     processoAtual->estado = Processo::PRONTO;
@@ -80,19 +87,23 @@ public:
                     processoAtual = filaProntos.front();
                     filaProntos.pop();
                     processoAtual->estado = Processo::EXECUTANDO;
+                    if (processoAtual->tempoInicioExecucao == -1)
+                        processoAtual->tempoInicioExecucao = tempo;
                     tempoExecutadoNoQuantum = 0;
                 } else {
                     processoAtual = nullptr;
                 }
             }
 
-            // Executa o processo atual
             if (processoAtual) {
                 processoAtual->tempoRestante--;
                 tempoExecutadoNoQuantum++;
+                cout << "[Tempo " << tempo << "] CPU executando " << processoAtual->pid
+                     << " | Tempo restante no processo: " << processoAtual->tempoRestante << "\n";
+            } else {
+                cout << "[Tempo " << tempo << "] CPU ociosa.\n";
             }
 
-            // Imprime o estado de todos os processos
             cout << "[Tempo " << tempo << "] Estado dos processos:\n";
             for (auto& p : todosProcessos) {
                 cout << "    " << setw(4) << p->pid 
@@ -100,10 +111,17 @@ public:
                      << " | Restante: " << p->tempoRestante << "\n";
             }
 
-            if (!processoAtual)
-                cout << "[Tempo " << tempo << "] CPU ociosa.\n";
-
             tempo++;
+        }
+
+        cout << "\n--- Simulacao finalizada no tempo " << tempo << " ---\n";
+        cout << "\n--- Estatisticas Finais ---\n";
+        cout << left << setw(10) << "PID" << setw(25) << "Tempo de vida" << "Tempo Pronto" << "\n";
+        for (auto& p : todosProcessos) {
+            int tempoVida = p->tempoFinalizacao - p->momentoCriacao;
+            cout << left << setw(10) << p->pid
+                 << setw(25) << tempoVida
+                 << p->tempoEmPronto << "\n";
         }
     }
 
@@ -121,7 +139,6 @@ int main() {
     string algoritmo;
     int quantum;
 
-    // Cabeçalho: ROUND_ROBIN|2
     getline(arquivo, linha);
     stringstream ss(linha);
     getline(ss, algoritmo, '|');
@@ -137,11 +154,12 @@ int main() {
     // Leitura dos processos
     while (getline(arquivo, linha)) {
         stringstream sl(linha);
-        string pid, tmp;
+        string tmp;
         int momento, tempo, prioridade;
+        string pid;
 
         getline(sl, tmp, '|'); momento = stoi(tmp);
-        getline(sl, pid, '|');
+        getline(sl, tmp, '|'); pid = tmp; // aceita pid numérico como string
         getline(sl, tmp, '|'); tempo = stoi(tmp);
         getline(sl, tmp, '|'); prioridade = stoi(tmp);
 
