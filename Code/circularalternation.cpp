@@ -8,21 +8,55 @@
 
 using namespace std;
 
-struct Processo {
+class Process {
+public:
     enum Estado { PRONTO, EXECUTANDO, BLOQUEADO, FINALIZADO };
 
-    int momentoCriacao;
-    string pid;
-    int tempoRestante;
-    Estado estado;
-    bool criado = false;
+    Process(string pid, int creation_time, int burst_time)
+        : pid(pid), creation_time(creation_time), burst_time(burst_time),
+          remaining_time(burst_time), start_time(-1), end_time(-1),
+          waiting_time(0), finished(false), estado(PRONTO), criado(false) {}
 
-    int tempoInicioExecucao = -1;
-    int tempoFinalizacao = -1;
-    int tempoEmPronto = 0;
+    string get_pid() const { return pid; }
+    int get_creation_time() const { return creation_time; }
+    int get_remaining_time() const { return remaining_time; }
+    int get_waiting_time() const { return waiting_time; }
+    int get_start_time() const { return start_time; }
+    int get_end_time() const { return end_time; }
+    bool is_finished() const { return finished; }
+    bool foi_criado() const { return criado; }
 
-    Processo(int m, string p, int t)
-        : momentoCriacao(m), pid(p), tempoRestante(t), estado(PRONTO) {}
+    void execute() {
+        if (remaining_time > 0) --remaining_time;
+        if (remaining_time == 0) {
+            finished = true;
+            estado = FINALIZADO;
+        } else {
+            estado = EXECUTANDO;
+        }
+    }
+
+    void set_start_time(int time) {
+        if (start_time == -1) start_time = time;
+    }
+
+    void set_end_time(int time) {
+        end_time = time;
+        estado = FINALIZADO;
+    }
+
+    void increment_waiting_time() {
+        ++waiting_time;
+    }
+
+    void marcarCriado() {
+        criado = true;
+        estado = PRONTO;
+    }
+
+    int get_lifetime() const {
+        return end_time - creation_time;
+    }
 
     string estadoComoString() const {
         switch (estado) {
@@ -33,81 +67,94 @@ struct Processo {
             default: return "DESCONHECIDO";
         }
     }
+
+private:
+    string pid;
+    int creation_time;
+    int burst_time;
+    int remaining_time;
+    int start_time;
+    int end_time;
+    int waiting_time;
+    bool finished;
+    bool criado;
+    Estado estado;
 };
 
-class Escalonador {
+class RoundRobinScheduler {
 private:
     int quantum;
     int tempo = 0;
-    vector<Processo*> todosProcessos;
-    queue<Processo*> filaProntos;
-    Processo* processoAtual = nullptr;
+    vector<Process*> todosProcessos;
+    queue<Process*> filaProntos;
+    Process* processoAtual = nullptr;
     int tempoExecutadoNoQuantum = 0;
 
 public:
-    Escalonador(int quantum) : quantum(quantum) {}
+    RoundRobinScheduler(int q) : quantum(q) {}
 
-    void adicionarProcesso(Processo* p) {
+    void adicionarProcesso(Process* p) {
         todosProcessos.push_back(p);
     }
 
     void simular() {
-        while (!todosFinalizados()) {
+        cout << "Simulacao iniciada (Round Robin - Quantum = " << quantum << ")\n\n";
 
+        while (!todosFinalizados()) {
+            // Criar processos no tempo atual
             for (auto& p : todosProcessos) {
-                if (!p->criado && p->momentoCriacao == tempo) {
-                    cout << "[Tempo " << tempo << "] Processo " << p->pid << " criado.\n";
-                    p->criado = true;
-                    p->estado = Processo::PRONTO;
+                if (p->get_creation_time() == tempo && !p->foi_criado()) {
+                    cout << "[Tempo " << tempo << "] Processo " << p->get_pid() << " criado.\n";
+                    p->marcarCriado();
                     filaProntos.push(p);
                 }
             }
 
-            for (auto& p : todosProcessos) {
-                if (p->estado == Processo::PRONTO)
-                    p->tempoEmPronto++;
+            // Incrementa tempo de espera para processos na fila de prontos
+            queue<Process*> temp;
+            while (!filaProntos.empty()) {
+                Process* p = filaProntos.front();
+                filaProntos.pop();
+                if (p != processoAtual)
+                    p->increment_waiting_time();
+                temp.push(p);
             }
+            filaProntos = temp;
 
-            if (processoAtual && processoAtual->tempoRestante == 0) {
-                processoAtual->estado = Processo::FINALIZADO;
-                processoAtual->tempoFinalizacao = tempo;
-                cout << "[Tempo " << tempo << "] Processo " << processoAtual->pid << " finalizado no tempo " << tempo << ".\n";
+            // Finaliza processo se terminou
+            if (processoAtual && processoAtual->get_remaining_time() == 0) {
+                processoAtual->set_end_time(tempo - 1);
+                cout << "[Tempo " << tempo << "] Processo " << processoAtual->get_pid() << " finalizado.\n";
                 processoAtual = nullptr;
                 tempoExecutadoNoQuantum = 0;
             }
 
+            // Troca de processo se quantum expirou ou não há processo atual
             if (!processoAtual || tempoExecutadoNoQuantum == quantum) {
-                if (processoAtual && processoAtual->tempoRestante > 0) {
-                    processoAtual->estado = Processo::PRONTO;
+                if (processoAtual && !processoAtual->is_finished()) {
+                    processoAtual->marcarCriado(); // volta ao estado PRONTO
                     filaProntos.push(processoAtual);
                 }
 
                 if (!filaProntos.empty()) {
                     processoAtual = filaProntos.front();
                     filaProntos.pop();
-                    processoAtual->estado = Processo::EXECUTANDO;
-                    if (processoAtual->tempoInicioExecucao == -1)
-                        processoAtual->tempoInicioExecucao = tempo;
+                    processoAtual->set_start_time(tempo);
                     tempoExecutadoNoQuantum = 0;
                 } else {
                     processoAtual = nullptr;
                 }
             }
 
-            if (processoAtual) {
-                processoAtual->tempoRestante--;
-                tempoExecutadoNoQuantum++;
-                cout << "[Tempo " << tempo << "] CPU executando " << processoAtual->pid
-                     << " | Tempo restante no processo: " << processoAtual->tempoRestante << "\n";
-            } else {
-                cout << "[Tempo " << tempo << "] CPU ociosa.\n";
-            }
+            // Executa processo atual
+            processoAtual->execute();
+            tempoExecutadoNoQuantum++;
 
-            cout << "[Tempo " << tempo << "] Estado dos processos:\n";
-            for (auto& p : todosProcessos) {
-                cout << "    " << setw(4) << p->pid 
-                     << " | Estado: " << setw(11) << p->estadoComoString() 
-                     << " | Restante: " << p->tempoRestante << "\n";
+            if (processoAtual->get_remaining_time() == 0) {
+                processoAtual->set_end_time(tempo + 1); // tempo +1 pois finaliza ao fim do ciclo atual
+                cout << "[Tempo " << tempo + 1 << "] Processo " << processoAtual->get_pid() << " finalizado.\n";
+                processoAtual = nullptr;
+                tempoExecutadoNoQuantum = 0;
             }
 
             tempo++;
@@ -115,18 +162,22 @@ public:
 
         cout << "\n--- Simulacao finalizada no tempo " << tempo << " ---\n";
         cout << "\n--- Estatisticas Finais ---\n";
-        cout << left << setw(10) << "PID" << setw(25) << "Tempo de vida" << "Tempo Pronto" << "\n";
+        cout << left << setw(10) << "PID" 
+             << setw(20) << "Tempo de vida" 
+             << "Tempo de espera\n";
         for (auto& p : todosProcessos) {
-            int tempoVida = p->tempoFinalizacao - p->momentoCriacao;
-            cout << left << setw(10) << p->pid
-                 << setw(25) << tempoVida
-                 << p->tempoEmPronto << "\n";
+            cout << left << setw(10) << p->get_pid()
+                 << setw(20) << p->get_lifetime()
+                 << p->get_waiting_time() << "\n";
         }
+
+        for (auto p : todosProcessos)
+            delete p;
     }
 
     bool todosFinalizados() {
         for (auto p : todosProcessos)
-            if (p->estado != Processo::FINALIZADO)
+            if (!p->is_finished())
                 return false;
         return true;
     }
@@ -134,8 +185,12 @@ public:
 
 int main() {
     ifstream arquivo("entrada.txt");
-    string linha;
-    string algoritmo;
+    if (!arquivo) {
+        cerr << "Erro ao abrir o arquivo de entrada.\n";
+        return 1;
+    }
+
+    string linha, algoritmo;
     int quantum;
 
     getline(arquivo, linha);
@@ -144,25 +199,24 @@ int main() {
     ss >> quantum;
 
     if (algoritmo != "ROUND_ROBIN") {
-        cerr << "Erro: Este escalonador implementa apenas o algoritmo ROUND_ROBIN.\n";
+        cerr << "Erro: Apenas ROUND_ROBIN e suportado.\n";
         return 1;
     }
 
-    Escalonador escalonador(quantum);
+    RoundRobinScheduler escalonador(quantum);
 
-    // Leitura dos processos
     while (getline(arquivo, linha)) {
         stringstream sl(linha);
         string tmp;
-        int momento, tempo, prioridade;
+        int momentoCriacao, tempoExecucao, prioridade;
         string pid;
 
-        getline(sl, tmp, '|'); momento = stoi(tmp);
-        getline(sl, tmp, '|'); pid = tmp; // aceita pid numérico como string
-        getline(sl, tmp, '|'); tempo = stoi(tmp);
-        getline(sl, tmp, '|'); prioridade = stoi(tmp);
+        getline(sl, tmp, '|'); momentoCriacao = stoi(tmp);
+        getline(sl, tmp, '|'); pid = tmp;
+        getline(sl, tmp, '|'); tempoExecucao = stoi(tmp);
+        getline(sl, tmp, '|'); prioridade = stoi(tmp); // ignorado
 
-        escalonador.adicionarProcesso(new Processo(momento, pid, tempo));
+        escalonador.adicionarProcesso(new Process(pid, momentoCriacao, tempoExecucao));
     }
 
     escalonador.simular();
