@@ -15,7 +15,7 @@ public:
     Process(string pid, int creation_time, int burst_time)
         : pid(pid), creation_time(creation_time), burst_time(burst_time),
           remaining_time(burst_time), start_time(-1), end_time(-1),
-          waiting_time(0), finished(false), estado(PRONTO), criado(false) {}
+          waiting_time(0), finished(false), criado(false), estado(PRONTO) {}
 
     string get_pid() const { return pid; }
     int get_creation_time() const { return creation_time; }
@@ -55,7 +55,7 @@ public:
     }
 
     int get_lifetime() const {
-        return end_time - creation_time;
+        return (end_time >= creation_time) ? (end_time - creation_time) : burst_time;
     }
 
     string estadoComoString() const {
@@ -110,7 +110,7 @@ public:
                 }
             }
 
-            // Incrementa tempo de espera para processos na fila de prontos
+            // Incrementar tempo de espera
             queue<Process*> temp;
             while (!filaProntos.empty()) {
                 Process* p = filaProntos.front();
@@ -121,18 +121,10 @@ public:
             }
             filaProntos = temp;
 
-            // Finaliza processo se terminou
-            if (processoAtual && processoAtual->get_remaining_time() == 0) {
-                processoAtual->set_end_time(tempo - 1);
-                cout << "[Tempo " << tempo << "] Processo " << processoAtual->get_pid() << " finalizado.\n";
-                processoAtual = nullptr;
-                tempoExecutadoNoQuantum = 0;
-            }
-
-            // Troca de processo se quantum expirou ou não há processo atual
-            if (!processoAtual || tempoExecutadoNoQuantum == quantum) {
+            // Troca de processo se quantum acabou
+            if (tempoExecutadoNoQuantum == quantum || processoAtual == nullptr) {
                 if (processoAtual && !processoAtual->is_finished()) {
-                    processoAtual->marcarCriado(); // volta ao estado PRONTO
+                    processoAtual->marcarCriado(); // volta à fila
                     filaProntos.push(processoAtual);
                 }
 
@@ -146,24 +138,31 @@ public:
                 }
             }
 
-            // Executa processo atual
-            processoAtual->execute();
-            tempoExecutadoNoQuantum++;
+            // Executar processo atual
+            if (processoAtual) {
+                cout << "[Tempo " << tempo << "] Processo " << processoAtual->get_pid()
+                     << " executando (restam " << processoAtual->get_remaining_time() << " unidades).\n";
 
-            if (processoAtual->get_remaining_time() == 0) {
-                processoAtual->set_end_time(tempo + 1); // tempo +1 pois finaliza ao fim do ciclo atual
-                cout << "[Tempo " << tempo + 1 << "] Processo " << processoAtual->get_pid() << " finalizado.\n";
-                processoAtual = nullptr;
-                tempoExecutadoNoQuantum = 0;
+                processoAtual->execute();
+                tempoExecutadoNoQuantum++;
+
+                // Se finalizou agora
+                if (processoAtual->is_finished()) {
+                    processoAtual->set_end_time(tempo + 1);
+                    cout << "[Tempo " << tempo + 1 << "] Processo " << processoAtual->get_pid() << " finalizado.\n";
+                    processoAtual = nullptr;
+                    tempoExecutadoNoQuantum = 0;
+                }
             }
 
             tempo++;
         }
 
+        // Estatísticas finais
         cout << "\n--- Simulacao finalizada no tempo " << tempo << " ---\n";
         cout << "\n--- Estatisticas Finais ---\n";
-        cout << left << setw(10) << "PID" 
-             << setw(20) << "Tempo de vida" 
+        cout << left << setw(10) << "PID"
+             << setw(20) << "Tempo de vida"
              << "Tempo de espera\n";
         for (auto& p : todosProcessos) {
             cout << left << setw(10) << p->get_pid()
