@@ -1,16 +1,20 @@
 #include <iostream>
-#include <fstream>
-#include <sstream>
+#include <fstream> // leitura de arquivos
+#include <sstream> // manipulação de strings
 #include <string>
-#include <iomanip>
-#include <cstdlib>
-#include <vector>
-#include <ctime>
+#include <iomanip> // formatação de saída
+#include <cstdlib> // gerar números aleatórios
+#include <vector>  // vetor de processos
+#include <map>     // Arvore rubro negra
+#include <queue>   // Fila de chegada
 
 // Prototipos de classes e structs
 class LotteryScheduler;
 class PriorityScheduler;
+class CFSScheduler;
+class RoundRobinScheduler;
 struct CompareProcessPriority;
+struct CFSKey;
 
 // Classe para os processos
 
@@ -35,8 +39,11 @@ private:
     int weights;
     int total_waiting_time;
 
+    // Public para acesso de outras classes
     friend class LotteryScheduler;
     friend class PriorityScheduler;
+    friend class CFSScheduler;
+    friend class RoundRobinScheduler;
     friend struct CompareProcessPriority;
 };
 
@@ -44,16 +51,16 @@ Process::Process(int pid, int creation_time, int burst_time, int tickets)
 {
     this->pid = pid;
     this->creation_time = creation_time;
-    this->burst_time = burst_time;
-    this->remaining_time = burst_time;
+    this->burst_time = burst_time;     // tempo total de execução do processo
+    this->remaining_time = burst_time; // tempo restante para o processo terminar
     this->start_time = -1;
     this->end_time = -1;
-    this->tickets = tickets;
-    this->weights = tickets;
+    this->tickets = tickets;                     // usado no escalonador por loteria
+    this->weights = (tickets > 0) ? tickets : 1; // valor minimo de um processo -> Me guiei pelo CFS original onde o maior peso indica a maior prioridade
     this->is_finished = false;
-    this->total_waiting_time = 0;
+    this->total_waiting_time = 0; // tempo total que o processo ficou na fila de espera
 }
-
+// Getters para acessar os atributos privados
 int Process::get_pid() const { return pid; }
 int Process::get_end_time() const { return end_time; }
 int Process::get_creation_time() const { return creation_time; }
@@ -64,32 +71,32 @@ int Process::get_total_waiting_time() const { return total_waiting_time; }
 class FileReader
 {
 public:
-    FileReader(const std::string &filename);
+    FileReader(const std::string &filename); // Construtor que recebe o nome do arquivo
     void read_file();
     std::string get_algorithm() const;
     int get_quantum() const;
-    const std::vector<int> &get_pids() const;
-    const std::vector<int> &get_creation_times() const;
-    const std::vector<int> &get_burst_times() const;
-    const std::vector<int> &get_ticket_values() const;
+    const std::vector<int> &get_pids() const;           // Retorna os PIDs dos processos
+    const std::vector<int> &get_creation_times() const; // Retorna os tempos de criação dos processos
+    const std::vector<int> &get_burst_times() const;    // Retorna os tempos de execução dos processos
+    const std::vector<int> &get_ticket_values() const;  // Retorna os valores de tickets dos processos
 
 private:
     std::string filename;
     std::string algorithm;
     int quantum;
-    std::vector<int> ticket_values;
-    std::vector<int> pids;
-    std::vector<int> burst_times;
-    std::vector<int> creation_times;
+    std::vector<int> ticket_values;  // vetores para armazenar os tickets
+    std::vector<int> pids;           // vetores para armazenar os pids
+    std::vector<int> burst_times;    // vetores para armazenar os tempos de execução
+    std::vector<int> creation_times; // vetores para armazenar os tempos de criação
 };
 
-FileReader::FileReader(const std::string &filename)
+FileReader::FileReader(const std::string &filename) //
 {
     this->filename = filename;
-    this->quantum = 0;
+    this->quantum = 0; // fatia de CPU inicializada como 0
 }
 
-void FileReader::read_file()
+void FileReader::read_file() // Lê o arquivo e armazena os dados dos processos
 {
     std::ifstream file(filename);
     std::string line;
@@ -100,38 +107,38 @@ void FileReader::read_file()
         return;
     }
 
-    if (std::getline(file, line))
+    if (std::getline(file, line)) // Lê a primeira linha do arquivo que contem o nome do algoritmo e a fatia de CPU
     {
         std::stringstream ss(line);
-        std::getline(ss, algorithm, '|');
+        std::getline(ss, algorithm, '|'); // Separa a string pelo delimitador '|'
         std::string quantum_str;
         std::getline(ss, quantum_str);
         quantum = std::stoi(quantum_str);
     }
 
-    while (std::getline(file, line))
+    while (std::getline(file, line)) // Lê as outras linhas do arquivo que contêm os dados dos processos
     {
         std::stringstream ss(line);
         std::string token;
         int pid_val, creation_time_val, burst_time_val, ticket_value;
 
-        std::getline(ss, token, '|');
+        std::getline(ss, token, '|'); // Lê o tempo de criação do processo
         creation_time_val = std::stoi(token);
-        std::getline(ss, token, '|');
+        std::getline(ss, token, '|'); // Lê o PID do processo
         pid_val = std::stoi(token);
-        std::getline(ss, token, '|');
+        std::getline(ss, token, '|'); // Lê o tempo de execução do processo
         burst_time_val = std::stoi(token);
-        std::getline(ss, token);
+        std::getline(ss, token); // Lê o valor do ticket do processo
         ticket_value = std::stoi(token);
 
-        creation_times.push_back(creation_time_val);
-        pids.push_back(pid_val);
-        burst_times.push_back(burst_time_val);
-        ticket_values.push_back(ticket_value);
+        creation_times.push_back(creation_time_val); // Armazena o tempo de criação do processo
+        pids.push_back(pid_val);                     // Armazena o PID do processo
+        burst_times.push_back(burst_time_val);       // Armazena o tempo de execução do processo
+        ticket_values.push_back(ticket_value);       // Armazena o valor do ticket do processo
     }
     file.close();
 }
-
+// Getters para acessar os atributos privados
 std::string FileReader::get_algorithm() const { return algorithm; }
 int FileReader::get_quantum() const { return quantum; }
 const std::vector<int> &FileReader::get_pids() const { return pids; }
@@ -145,29 +152,29 @@ class LotteryScheduler
 {
 public:
     LotteryScheduler();
-    void set_algorithm_name(const std::string &name);
-    void set_quantum(int q);
-    void add_process(const Process &process);
-    void run();
-    void print_statistics();
+    void set_algorithm_name(const std::string &name); // Define o nome do algoritmo
+    void set_quantum(int q);                          // Define a fatia de CPU
+    void add_process(const Process &process);         // Adiciona um processo ao escalonador
+    void run();                                       // roda o escalonador
+    void print_statistics();                          // printa as estatísticas finais
 
 private:
-    void update_ready_queue();
-    Process *select_winner();
-    std::vector<Process> processes;
-    std::vector<Process *> ready_queue;
+    void update_ready_queue();          // Atualiza a fila de processos prontos
+    Process *select_winner();           // Seleciona o processo vencedor com base nos tickets
+    std::vector<Process> processes;     // vetor de processos
+    std::vector<Process *> ready_queue; // fila de processos prontos
     std::string algorithm_name;
-    int quantum;
-    int current_time;
+    int quantum;      // fatia de CPU
+    int current_time; // tempo atual do escalonador
 };
 
-LotteryScheduler::LotteryScheduler()
+LotteryScheduler::LotteryScheduler() // Construtor
 {
     quantum = 0;
     current_time = 0;
 }
 
-void LotteryScheduler::set_algorithm_name(const std::string &name) { algorithm_name = name; }
+void LotteryScheduler::set_algorithm_name(const std::string &name) { algorithm_name = name; } //
 void LotteryScheduler::set_quantum(int q) { quantum = q; }
 void LotteryScheduler::add_process(const Process &process) { processes.push_back(process); }
 
@@ -187,7 +194,7 @@ void LotteryScheduler::update_ready_queue()
 
         if (!process.is_finished && !in_ready_queue && process.creation_time <= current_time)
         {
-            process.total_waiting_time += (current_time - process.creation_time);
+            // A linha incorreta de cálculo de tempo de espera foi removida daqui
             ready_queue.push_back(&process);
         }
     }
@@ -219,18 +226,18 @@ Process *LotteryScheduler::select_winner()
 
 void LotteryScheduler::run()
 {
-    std::srand(time(0));
+    std::srand(time(0)); // semente aleatória
 
     std::cout << "--- Iniciando Simulacao do Escalonador ---\n";
     std::cout << "Algoritmo: " << algorithm_name << " | Fatia de CPU: " << quantum << std::endl
               << std::endl;
 
-    while (true)
+    while (true) // loop do escalonador
     {
-        update_ready_queue();
+        update_ready_queue(); // Atualiza a fila de processos prontos
 
         bool all_finished = true;
-        for (const auto &process : processes)
+        for (const auto &process : processes) // percorre todos os processos e verifica se todos estão finalizados
         {
             if (!process.is_finished)
             {
@@ -238,47 +245,41 @@ void LotteryScheduler::run()
                 break;
             }
         }
-        if (all_finished)
+        if (all_finished) // se todos os processos estão finalizados, encerra a simulação
         {
             std::cout << "\n--- Simulacao finalizada no tempo " << current_time << " ---\n";
             break;
         }
 
-        if (ready_queue.empty())
+        if (ready_queue.empty()) // se a fila de processos prontos está vazia, incrementa o tempo atual
         {
             current_time++;
             continue;
         }
 
-        Process *winner = select_winner();
+        Process *winner = select_winner(); // Seleciona o processo vencedor com base nos tickets
         if (winner == nullptr)
         {
             current_time++;
             continue;
         }
-        if (winner->start_time == -1)
+        if (winner->start_time == -1) // Se o processo vencedor ainda não começou, define o tempo de início
         {
             winner->start_time = current_time;
         }
 
-        int time_to_run = std::min(winner->remaining_time, quantum);
+        int time_to_run = std::min(winner->remaining_time, quantum); // Calcula o tempo que o processo vencedor vai rodar na CPU
 
         std::cout << "Tempo[" << std::setw(3) << current_time << " -> " << std::setw(3) << current_time + time_to_run << "]: "
                   << "Processo " << winner->get_pid() << " esta na CPU. (Restante: "
                   << winner->remaining_time - time_to_run << ")" << std::endl;
 
-        for (Process *process : ready_queue)
-        {
-            if (process->get_pid() != winner->get_pid())
-            {
-                process->total_waiting_time += time_to_run;
-            }
-        }
+        // O bloco incorreto de cálculo de tempo de espera foi removido daqui
 
         current_time += time_to_run;
-        winner->remaining_time -= time_to_run;
+        winner->remaining_time -= time_to_run; // Atualiza o tempo restante do processo vencedor
 
-        if (winner->remaining_time <= 0)
+        if (winner->remaining_time <= 0) // Se o processo vencedor terminou, marca como finalizado e remove da fila de prontos
         {
             winner->is_finished = true;
             winner->end_time = current_time;
@@ -306,8 +307,9 @@ void LotteryScheduler::print_statistics()
 
     for (const auto &process : processes)
     {
-        int turnaround_time = process.get_end_time() - process.get_creation_time();
-        int waiting_time = process.get_total_waiting_time();
+        int turnaround_time = process.get_end_time() - process.get_creation_time(); // tempo total de existencia do processo
+        // CORREÇÃO APLICADA AQUI
+        int waiting_time = turnaround_time - process.burst_time;
 
         std::cout << std::left << std::setw(10) << process.get_pid()
                   << std::setw(25) << turnaround_time
@@ -317,36 +319,36 @@ void LotteryScheduler::print_statistics()
 
 // Escalonador por prioridade
 
-struct CompareProcessPriority
+struct CompareProcessPriority // struct para comparar processos
 {
     bool operator()(const Process &a, const Process &b) const
     {
         if (a.weights != b.weights)
         {
-            return a.weights > b.weights;
+            return a.weights < b.weights;
         }
         return a.creation_time > b.creation_time;
     }
 };
 
-class PriorityScheduler
+class PriorityScheduler // Classe do escalonador por prioridade
 {
 private:
-    std::vector<Process> ready_queue;
-    std::vector<Process> pending_processes;
-    std::vector<Process> finalizados;
+    std::vector<Process> ready_queue;       // Fila de processos prontos
+    std::vector<Process> pending_processes; // Fila de processos pendentes
+    std::vector<Process> finalizados;       // Fila de processos finalizados
     int current_time = 0;
-    int quantum;
-    CompareProcessPriority comparator;
+    int quantum;                       // Fatia de CPU
+    CompareProcessPriority comparator; // Comparador de processos por prioridade
 
-    void manual_swap(Process &a, Process &b)
+    void manual_swap(Process &a, Process &b) // Função para trocar dois processos
     {
         Process temp = a;
         a = b;
         b = temp;
     }
 
-    void merge(std::vector<Process> &processes, int left, int mid, int right)
+    void merge(std::vector<Process> &processes, int left, int mid, int right) // Função para mesclar dois subarrays
     {
         int n1 = mid - left + 1;
         int n2 = right - mid;
@@ -383,7 +385,7 @@ private:
             processes[k++] = R[j++];
     }
 
-    void merge_sort(std::vector<Process> &processes, int left, int right)
+    void merge_sort(std::vector<Process> &processes, int left, int right) // Função para ordenar os processos com merge sort
     {
         if (left >= right)
         {
@@ -398,7 +400,7 @@ private:
         merge(processes, left, mid, right);
     }
 
-    void heapify_up(int index)
+    void heapify_up(int index) // Função para manter a propriedade do heap ao inserir um novo processo
     {
         if (index == 0)
             return;
@@ -410,7 +412,7 @@ private:
             heapify_up(parent_index);
         }
     }
-    void heapify_down(int index)
+    void heapify_down(int index) // Função para manter a propriedade do heap ao remover o processo de maior prioridade
     {
         int left_child_index = 2 * index + 1;
         int right_child_index = 2 * index + 2;
@@ -433,9 +435,9 @@ private:
     }
 
 public:
-    PriorityScheduler(int q) : quantum(q) {}
+    PriorityScheduler(int q) : quantum(q) {} // Construtor que recebe a fatia de CPU
 
-    void addProcess(int pid, int creation_time, int burst_time, int priority)
+    void addProcess(int pid, int creation_time, int burst_time, int priority) // Adiciona um processo à fila de pendentes
     {
         pending_processes.emplace_back(pid, creation_time, burst_time, priority);
     }
@@ -523,6 +525,264 @@ public:
     }
 };
 
+// Escalonador CFS
+
+// Fornece a ordenação
+struct CFSKey
+{
+    double vruntime;
+    int pid;
+
+    bool operator<(const CFSKey &other) const
+    {
+        // compara os vruntimes
+        if (vruntime == other.vruntime)
+            return pid < other.pid; // Se os vruntimes são iguais, usa o PID como desempate
+        return vruntime < other.vruntime;
+    }
+};
+
+// Classe do Escalonador CFS
+class CFSScheduler
+{
+private:
+    std::map<CFSKey, Process> run_queue; // fila processos -> usa a arvore da lib
+    std::queue<Process> arrival_queue;   // Fila de chegada
+    std::vector<Process> finished_processes;
+    int cpu_time = 0;
+    // define a quantidade de tempo que um processo pode rodar na cpu, apos isso ele muda -> IMPORTANTE Pode mudar mas olhe bem os arquivos nao coloque um número absurdo
+    const int TIME_SLICE;
+    // peso mínimo que um processo pode ter vai ser usado para o cálculo do vrtime
+    const int MIN_WEIGHT = 1;
+
+public:
+    CFSScheduler(int time_slice) : TIME_SLICE(time_slice) {}
+    void load_processes(const FileReader &reader)
+    {
+        const auto &pids = reader.get_pids();
+        const auto &creation_times = reader.get_creation_times();
+        const auto &burst_times = reader.get_burst_times();
+        const auto &tickets = reader.get_ticket_values();
+
+        for (size_t i = 0; i < pids.size(); ++i)
+        {
+            Process proc(pids[i], creation_times[i], burst_times[i], tickets[i]);
+            arrival_queue.push(proc);
+        }
+    }
+
+    void run()
+    {
+        std::cout << "\n--- Iniciando Simulacao do Escalonador ---\n";
+        std::cout << "Algoritmo: CFS | Fatia de CPU: " << TIME_SLICE << "\n\n";
+
+        while (!run_queue.empty() || !arrival_queue.empty())
+        {
+            // mover processos para a fila de execução
+            while (!arrival_queue.empty() && arrival_queue.front().creation_time <= cpu_time)
+            {
+                Process proc = arrival_queue.front();
+                arrival_queue.pop();
+                run_queue.insert({{0.0, proc.pid}, proc});
+            }
+
+            if (run_queue.empty())
+            {
+                cpu_time++;
+                continue;
+            }
+
+            auto it = run_queue.begin();
+            CFSKey key = it->first;
+            Process proc = it->second;
+            run_queue.erase(it);
+
+            int slice = std::min(TIME_SLICE, proc.remaining_time);
+            int start = cpu_time;
+            int end = cpu_time + slice;
+
+            std::cout << "Tempo[" << std::setw(3) << start << " -> " << std::setw(3) << end << "]: Processo "
+                      << proc.pid << " esta na CPU. (Restante: " << (proc.remaining_time - slice) << ")\n";
+
+            if (proc.start_time == -1)
+                proc.start_time = cpu_time;
+
+            cpu_time += slice;
+            proc.remaining_time -= slice;
+
+            // Calcula o novo vruntime baseado no tempo de execução do processo (slice).
+            // Fórmula: vruntime += (tempo_executado * MIN_WEIGHT) / peso_do_processo
+            // Quanto maior o peso (maior prioridade), mais lentamente o vruntime cresce,
+            // permitindo que o processo tenha mais tempo de CPU ao longo do tempo.
+            double new_vruntime = key.vruntime + (static_cast<double>(slice) * MIN_WEIGHT) / proc.weights;
+
+            proc.total_waiting_time = cpu_time - proc.creation_time - (proc.burst_time - proc.remaining_time);
+
+            if (proc.remaining_time > 0)
+            {
+                run_queue.insert({{new_vruntime, proc.pid}, proc});
+            }
+            else
+            {
+                proc.end_time = cpu_time;
+                proc.is_finished = true;
+                std::cout << ">>> Processo " << proc.pid << " finalizado no tempo " << cpu_time << " <<<\n";
+                finished_processes.push_back(proc);
+            }
+        }
+
+        std::cout << "\n--- Simulacao finalizada no tempo " << cpu_time << " ---\n\n";
+        print_statistics();
+    }
+
+    void print_statistics()
+    {
+        std::cout << "--- Estatisticas Finais ---\n";
+        std::cout << "PID       Tempo Total                 Tempo Pronto\n";
+        std::cout << "------------------------------------------------------------\n";
+
+        for (const auto &proc : finished_processes)
+        {
+            int tempo_total = proc.end_time - proc.creation_time;
+            std::cout << std::left << std::setw(10) << proc.pid
+                      << std::setw(25) << tempo_total
+                      << proc.total_waiting_time << "\n";
+        }
+    }
+};
+
+// Escalonador por Alternancia Circular
+
+class RoundRobinScheduler
+{
+public:
+    RoundRobinScheduler();
+    void set_algorithm_name(const std::string &name);
+    void set_quantum(int q);
+    void add_process(const Process &process);
+    void run();
+    void print_statistics();
+
+private:
+    void update_ready_queue();
+    std::vector<Process> all_processes;
+    std::queue<Process *> ready_queue;
+    std::string algorithm_name;
+    int quantum;
+    int current_time;
+    size_t finished_process_count;
+};
+
+RoundRobinScheduler::RoundRobinScheduler()
+{
+    quantum = 0;
+    current_time = 0;
+    finished_process_count = 0;
+}
+
+void RoundRobinScheduler::set_algorithm_name(const std::string &name) { algorithm_name = name; }
+void RoundRobinScheduler::set_quantum(int q) { quantum = q; }
+void RoundRobinScheduler::add_process(const Process &process) { all_processes.push_back(process); }
+
+void RoundRobinScheduler::update_ready_queue()
+{
+    for (auto &process : all_processes)
+    {
+        if (!process.is_finished && process.creation_time <= current_time)
+        {
+            bool in_queue = false;
+
+            std::queue<Process *> temp_q = ready_queue;
+            while (!temp_q.empty())
+            {
+                if (temp_q.front()->get_pid() == process.get_pid())
+                {
+                    in_queue = true;
+                    break;
+                }
+                temp_q.pop();
+            }
+            if (process.start_time != -1)
+                in_queue = true;
+
+            if (!in_queue)
+            {
+                ready_queue.push(&process);
+            }
+        }
+    }
+}
+
+void RoundRobinScheduler::run()
+{
+    std::cout << "--- Iniciando Simulacao do Escalonador ---\n";
+    std::cout << "Algoritmo: " << algorithm_name << " | Fatia de CPU: " << quantum << std::endl
+              << std::endl;
+
+    while (finished_process_count < all_processes.size())
+    {
+        update_ready_queue();
+
+        if (ready_queue.empty())
+        {
+            current_time++;
+            continue;
+        }
+
+        Process *current_proc = ready_queue.front();
+        ready_queue.pop();
+
+        if (current_proc->start_time == -1)
+        {
+            current_proc->start_time = current_time;
+        }
+
+        int time_to_run = std::min(current_proc->remaining_time, quantum);
+
+        std::cout << "Tempo[" << std::setw(3) << current_time << " -> " << std::setw(3) << current_time + time_to_run << "]: "
+                  << "Processo " << current_proc->get_pid() << " esta na CPU. (Restante: "
+                  << current_proc->remaining_time - time_to_run << ")" << std::endl;
+
+        current_time += time_to_run;
+        current_proc->remaining_time -= time_to_run;
+
+        update_ready_queue();
+
+        if (current_proc->remaining_time > 0)
+        {
+            ready_queue.push(current_proc);
+        }
+        else
+        {
+            current_proc->end_time = current_time;
+            current_proc->is_finished = true;
+            finished_process_count++;
+            std::cout << ">>> Processo " << current_proc->get_pid() << " finalizado no tempo " << current_time << " <<<" << std::endl;
+        }
+    }
+
+    std::cout << "\n--- Simulacao finalizada no tempo " << current_time << " ---\n";
+}
+
+void RoundRobinScheduler::print_statistics()
+{
+    std::cout << "\n--- Estatisticas Finais ---\n";
+    std::cout << std::left << std::setw(10) << "PID"
+              << std::setw(25) << "Tempo Total"
+              << std::setw(25) << "Tempo Pronto" << std::endl;
+    std::cout << "------------------------------------------------------------\n";
+
+    for (const auto &process : all_processes)
+    {
+        int turnaround_time = process.get_end_time() - process.get_creation_time();
+        int waiting_time = turnaround_time - process.burst_time;
+
+        std::cout << std::left << std::setw(10) << process.get_pid()
+                  << std::setw(25) << turnaround_time
+                  << std::setw(25) << waiting_time << std::endl;
+    }
+}
+
 int main()
 {
     std::cout << "Digite o nome do arquivo de entrada: ";
@@ -573,9 +833,36 @@ int main()
         }
         scheduler.run();
     }
+    else if (algorithm == "cfs")
+    {
+        CFSScheduler scheduler(file_reader.get_quantum());
+        scheduler.load_processes(file_reader);
+        scheduler.run();
+    }
+    else if (algorithm == "alternanciacircular")
+    {
+        RoundRobinScheduler scheduler;
+        scheduler.set_algorithm_name(file_reader.get_algorithm());
+        scheduler.set_quantum(file_reader.get_quantum());
+
+        const std::vector<int> &pids = file_reader.get_pids();
+        const std::vector<int> &creation_times = file_reader.get_creation_times();
+        const std::vector<int> &burst_times = file_reader.get_burst_times();
+        const std::vector<int> &ticket_values = file_reader.get_ticket_values();
+
+        for (size_t i = 0; i < pids.size(); ++i)
+        {
+            Process process(pids[i], creation_times[i], burst_times[i], ticket_values[i]);
+            scheduler.add_process(process);
+        }
+
+        scheduler.run();
+        scheduler.print_statistics();
+    }
+
     else
     {
-        std::cerr << "Erro: Algoritmo '" << algorithm << "' nao reconhecido. Verifique o arquivo de entrada." << std::endl;
+        std::cerr << "Algoritmo não suportado ou ainda não implementado.\n";
     }
 
     return 0;
